@@ -1,0 +1,15 @@
+# Test template for validation
+version: '3.8'
+
+services:
+  test_service:
+    image: test:{{ version | default('latest') }}
+    container_name: test_{{ instance | default('1') }}
+    ports:
+      - "{{ port | default('8080') }}:8080"
+    environment:
+      - TEST_MODE={{ mode | default('test') }}
+
+networks:
+  test_network:
+    driver: bridge
