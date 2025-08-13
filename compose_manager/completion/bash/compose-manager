@@ -1,0 +1,2 @@
+#!/bin/bash
+eval "$(_COMPOSE_MANAGER_COMPLETE=bash_source compose-manager)"

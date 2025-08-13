@@ -2,15 +2,29 @@
 Core Compose Manager functionality
 """
 
-import os
+from email.policy import default
 import json
 import yaml
 from pathlib import Path
 from typing import Dict, List, Any, Optional
-from jinja2 import Environment, FileSystemLoader, Template
+from jinja2 import Environment, FileSystemLoader
 import logging
+from dataclasses import dataclass, field
+
+from ..core.compose_generator import ComposeGenerator, GenerationResult
+from ..core.templates import create_sample_config, ConfigType, ConfigVariables, TemplateInfo
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ValidationResult:
+    """Result of template and variable validation"""
+    success: bool = False
+    missing_templates: List[str] = field(default_factory=list)
+    variable_errors: List[str] = field(default_factory=list)
+    template_errors: List[str] = field(default_factory=list)
+    parsed_variables: Dict[str, Any] = field(default_factory=dict)
 
 
 class ComposeManager:
@@ -26,6 +40,7 @@ class ComposeManager:
         """
         self.templates_dir = Path(templates_dir or "templates")
         self.config_file = Path(config_file or "dcm_configurations.json")
+        self.sample_config_file = Path("sample_configuration.json")
 
         # Ensure templates directory exists
         self.templates_dir.mkdir(exist_ok=True)
@@ -39,13 +54,17 @@ class ComposeManager:
 
         # Template categories
         self.categories = {
-            'flight': 'Flight Containers',
-            'hatp': 'HATP Containers',
-            'mission_system': 'Mission System Containers',
-            'mission_autonomy': 'Mission Autonomy Containers'
+            # 'flight': 'Flight Containers',
+            # 'hatp': 'HATP Containers',
+            # 'mission_system': 'Mission System Containers',
+            # 'mission_autonomy': 'Mission Autonomy Containers'
         }
 
-        self.configurations = {}
+        self.compose_generator = ComposeGenerator(
+            self.jinja_env,
+        )
+
+        self.configurations: ConfigType = {}
         self.load_configurations()
 
     def load_configurations(self) -> None:
@@ -61,12 +80,12 @@ class ComposeManager:
         else:
             logger.info("No configuration file found, starting with empty configurations")
 
-    def save_configurations(self) -> None:
+    def save_configurations(self, configurations: ConfigType, location: Path) -> None:
         """Save configurations to file"""
         try:
-            with open(self.config_file, 'w') as f:
-                json.dump(self.configurations, f, indent=2)
-            logger.info(f"Saved {len(self.configurations)} configurations")
+            with open(location, 'w') as f:
+                json.dump(configurations, f, indent=2)
+            logger.info(f"Saved {len(configurations)} configurations")
         except Exception as e:
             logger.error(f"Error saving configurations: {e}")
 
@@ -95,10 +114,39 @@ class ComposeManager:
         Returns:
             Dictionary mapping category names to lists of template files
         """
-        templates = {}
-        for category in self.categories.keys():
-            templates[category] = self.get_template_files(category)
+        all_keys = []
+
+        merged = {**self.configurations, **create_sample_config()}
+        for item in merged.values():
+            selected = item.get("selected_templates", {})
+            all_keys.extend(selected.keys())
+
+        # Remove duplicates
+        categories = list(set(all_keys))
+
+        templates = {
+            category: temps
+            for category in categories
+            if (temps := self.get_template_files(category))
+        }
+
+        # Handle miscellaneous category
+        all_template_files = self.get_templates_simple()
+
+        categorized_files = set()
+        for file_list in templates.values():
+            categorized_files.update(file_list)
+
+        uncategorized_files = list(all_template_files - categorized_files)
+        if uncategorized_files:
+            templates["others"] = uncategorized_files
+
         return templates
+
+    def get_templates_simple(self) -> set[str]:
+        all_template_files = set(f.name for f in self.templates_dir.glob("*.yml.j2"))
+        all_template_files.update(f.name for f in self.templates_dir.glob("*.yaml.j2"))
+        return all_template_files
 
     def parse_template_services(self, template_file: str) -> List[str]:
         """
@@ -136,20 +184,26 @@ class ComposeManager:
             in_services = False
 
             for line in lines:
-                stripped = line.strip()
-                if stripped == 'services:':
-                    in_services = True
+                # Skip Jinja control structures
+                if line.strip().startswith('{%') or line.strip().startswith('{{'):
                     continue
-                elif in_services and stripped and not stripped.startswith(' ') and ':' in stripped:
-                    if stripped.startswith('{%') or stripped.startswith('{{'):
-                        # Skip Jinja2 control structures
-                        continue
-                    service_name = stripped.split(':')[0].strip()
-                    if service_name != 'services':
-                        services.append(service_name)
-                elif in_services and stripped and not stripped.startswith(' ') and not stripped.startswith('#'):
-                    # End of services section
-                    break
+
+                if not in_services:
+                    if line.strip() == 'services:':
+                        in_services = True
+                    continue
+
+                # Stop collecting if we reach a line that is not indented or starts a new top-level section
+                if in_services:
+                    if line.startswith(' ') or line.startswith('\t'):
+                        # Count indentation
+                        indent_level = len(line) - len(line.lstrip())
+                        if indent_level == 2 and ':' in line:
+                            key = line.strip().split(':')[0]
+                            services.append(key)
+                    else:
+                        # We've reached a new section or end of 'services'
+                        break
 
             return services
 
@@ -157,7 +211,7 @@ class ComposeManager:
             logger.error(f"Error parsing template {template_file}: {e}")
             return []
 
-    def validate_template(self, template_file: str, variables: Dict[str, Any] = None) -> tuple[bool, str]:
+    def validate_template(self, template_file: str, variables: Dict[str, Any] = {}) -> tuple[bool, str]:
         """
         Validate a template file
 
@@ -185,112 +239,77 @@ class ComposeManager:
         except Exception as e:
             return False, f"Template validation failed: {str(e)}"
 
+    def validate_templates(self, templates: List[str], parsed_variables: Dict[str, Dict[str, Any]]) -> ValidationResult:
+        """
+        Validate templates and variables for generation
+
+        Args:
+            templates: List of template filenames
+            variables: List of variables in key=value format
+
+        Returns:
+            ValidationResult with all validation outcomes
+        """
+        result = ValidationResult(success=True)
+
+        # Get available templates
+        templates_dict = self.get_all_templates()
+        all_templates = [item for sublist in templates_dict.values() for item in sublist]
+
+        # Check template availability
+        for template_file in templates:
+            if template_file not in all_templates:
+                result.missing_templates.append(template_file)
+
+        # Validate template content
+        self._validate_template_content(templates, parsed_variables, result)
+
+        # Set overall success
+        result.success = (not result.missing_templates and
+                         not result.variable_errors and
+                         not result.template_errors)
+
+        return result
+
+    def _validate_template_content(self, templates: List[str], variables: Dict[str, Dict[str, Any]],
+                                 result: ValidationResult) -> None:
+        """Validate template content"""
+        for template_file in templates:
+            template_vars = {**variables.get(template_file, {}), **variables.get("defaults", {})}
+            is_valid, error_msg = self.validate_template(template_file, template_vars)
+            if not is_valid:
+                result.template_errors.append(f"Template '{template_file}': {error_msg}")
+
     def generate_compose_file(self,
-                            selected_templates: Dict[str, List[str]],
+                            templates: List[str],
                             output_file: str = "compose.yml",
-                            variables: Dict[str, Any] = None) -> bool:
+                            variables: Dict[str, Dict[str, Any]] = {},
+                            merge_strategy: str = "overwrite") -> GenerationResult:
         """
         Generate final compose.yml from selected templates
 
         Args:
-            selected_templates: Dictionary mapping categories to lists of template files
+            templates: List of template files
             output_file: Path to output compose file
             variables: Variables for template rendering
+            merge_strategy: How to manage conflicting definitions
 
         Returns:
             True if generation successful, False otherwise
         """
-        try:
-            if variables is None:
-                variables = {}
+        return self.compose_generator.generate_compose_file(
+            templates,
+            self.templates_dir,
+            output_file,
+            variables,
+            merge_strategy
+        )
 
-            logger.info(f"Generating compose file with {sum(len(templates) for templates in selected_templates.values())} templates")
+    def get_configuration_names(self) -> List[str]:
+        return list(self.configurations.keys())
 
-            # Start with base compose structure
-            compose_data = {
-                'version': '3.8',
-                'services': {},
-                'networks': {},
-                'volumes': {}
-            }
-
-            # Process each selected template
-            for category, templates in selected_templates.items():
-                logger.debug(f"Processing {len(templates)} templates for category: {category}")
-
-                for template_file in templates:
-                    try:
-                        template_path = self.templates_dir / template_file
-                        if not template_path.exists():
-                            logger.warning(f"Template file not found: {template_file}")
-                            continue
-
-                        # Render template with Jinja2
-                        template = self.jinja_env.get_template(template_file)
-                        rendered_content = template.render(**variables)
-
-                        # Parse rendered YAML
-                        template_data = yaml.safe_load(rendered_content)
-                        if not template_data:
-                            logger.warning(f"Template {template_file} rendered to empty content")
-                            continue
-
-                        # Merge services
-                        if 'services' in template_data:
-                            for service_name, service_config in template_data['services'].items():
-                                if service_name in compose_data['services']:
-                                    logger.warning(f"Service '{service_name}' already exists, overwriting")
-                                compose_data['services'][service_name] = service_config
-
-                        # Merge networks
-                        if 'networks' in template_data:
-                            compose_data['networks'].update(template_data['networks'])
-
-                        # Merge volumes
-                        if 'volumes' in template_data:
-                            compose_data['volumes'].update(template_data['volumes'])
-
-                        # Handle other top-level keys
-                        for key, value in template_data.items():
-                            if key not in ['services', 'networks', 'volumes', 'version']:
-                                if key in compose_data:
-                                    if isinstance(compose_data[key], dict) and isinstance(value, dict):
-                                        compose_data[key].update(value)
-                                    else:
-                                        compose_data[key] = value
-                                else:
-                                    compose_data[key] = value
-
-                        logger.debug(f"Successfully processed template: {template_file}")
-
-                    except yaml.YAMLError as e:
-                        logger.error(f"Error parsing YAML from {template_file}: {e}")
-                        continue
-                    except Exception as e:
-                        logger.error(f"Error processing template {template_file}: {e}")
-                        continue
-
-            # Clean up empty sections
-            if not compose_data['networks']:
-                del compose_data['networks']
-            if not compose_data['volumes']:
-                del compose_data['volumes']
-
-            # Write final compose file
-            output_path = Path(output_file)
-            with open(output_path, 'w') as f:
-                yaml.dump(compose_data, f, default_flow_style=False, indent=2, sort_keys=False)
-
-            service_count = len(compose_data['services'])
-            logger.info(f"Successfully generated {output_file} with {service_count} services")
-            return True
-
-        except Exception as e:
-            logger.error(f"Error generating compose file: {e}")
-            return False
-
-    def save_configuration(self, name: str, selected_templates: Dict[str, List[str]],
-                          variables: Dict[str, str]) -> None:
+    def save_configuration(self, name: str, selected_templates: Dict[str, TemplateInfo],
+                          variables: dict[str, dict[str, Any]]) -> None:
         """
         Save a configuration for later use
 
@@ -299,16 +318,16 @@ class ComposeManager:
             selected_templates: Selected templates by category
             variables: Template variables
         """
-        config = {
+        config: ConfigVariables= {
             'selected_templates': selected_templates.copy(),
             'variables': variables.copy()
         }
 
         self.configurations[name] = config
-        self.save_configurations()
+        self.save_configurations(self.configurations, self.config_file)
         logger.info(f"Saved configuration: {name}")
 
-    def load_configuration(self, name: str) -> Optional[Dict[str, Any]]:
+    def load_configuration(self, name: str) -> ConfigVariables | None:
         """
         Load a saved configuration
 
@@ -346,7 +365,7 @@ class ComposeManager:
         """
         if name in self.configurations:
             del self.configurations[name]
-            self.save_configurations()
+            self.save_configurations(self.configurations, self.config_file)
             logger.info(f"Deleted configuration: {name}")
             return True
         else:
