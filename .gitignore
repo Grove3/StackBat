@@ -72,4 +72,7 @@ Thumbs.db
 
 # Project specific
 dcm_configurations.json
+sample_configuration.json
+*compose.yml
+templates/*
 *.log

@@ -26,8 +26,10 @@ pip install compose-manager[gui]
 
 ### Development Installation
 ```bash
-git clone https://github.com/yourusername/compose-manager.git
+git clone git@bitbucket.org:grove_3/compose-manager.git
 cd compose-manager
+python3 -m venv venv
+source venv/bin/activate
 pip install -e .[dev,gui]
 ```
 
