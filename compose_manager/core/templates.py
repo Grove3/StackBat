@@ -22,49 +22,96 @@ class ConfigVariables(TypedDict):
 ConfigType = Dict[str, ConfigVariables]
 
 
-def create_sample_config() -> ConfigType:
-    return {
-        "demo": {
-            "selected_templates": {
-                "password": {
-                    "display_name": "Password Manager",
-                    "templates": ["traefik.yml.j2", "password_bitwarden.yml.j2"],
-                },
-                "torrents": {
-                    "display_name": "Torrents",
-                    "templates": ["torrents_pia_vpn.yml.j2"],
-                },
-                "photo": {
-                    "display_name": "Photo Prism",
-                    "templates": ["photoprism.yml.j2", "traefik.yml.j2"]
-                }
-            },
-            "variables": {
-                "traefik.yml.j2": {
-                    "tag": "latest",
-                    "restart": "unless-stopped",
-                    "cf_api_email": "user@example.com",
-                    "cf_dns_api_token": "your-token-here",
-                    "traefik_network": "proxy"
-                },
-                "password_bitwarden.yml.j2": {"tag": "local", "traefik_label": "bitwarden"},
-                "torrents_pia_vpn.yml.j2": {
-                    "local_ip": "192.168.0.3",
-                    "dns_ip": "192.168.0.3",
-                    "ports": ["1234:1234", "5678:5678"],
-                },
-                "photoprism.yml.j2": {
-                    "password": "super_secret",
 
-                },
-                "defaults": {
-                    "restart": "always",
-                    "docker_volume_dir": "your/docker/volumes",
-                    "domain": "example.com"
-                },
-            },
-        },
-    }
+def create_sample_config(config_file: Path, force: bool = False) -> bool:
+    sample_config = """
+demo:
+  selected_templates: &demo_selected_templates
+    password:
+      display_name: "Password Manager"
+      templates:
+        - "traefik.yml.j2"
+        - "password_bitwarden.yml.j2"
+    torrents:
+      display_name: "Torrents"
+      templates:
+        - "torrents_pia_vpn.yml.j2"
+    photo:
+      display_name: "Photo Prism"
+      templates:
+        - "photoprism.yml.j2"
+        - "traefik.yml.j2"
+  variables: &demo_variables
+    traefik.yml.j2:
+      tag: "latest"
+      restart: "unless-stopped"
+      cf_api_email: "user@example.com"
+      cf_dns_api_token: "your-token-here"
+      traefik_network: "proxy"
+    password_bitwarden.yml.j2:
+      tag: "local"
+      traefik_label: "bitwarden"
+    torrents_pia_vpn.yml.j2:
+      local_ip: "192.168.0.3"
+      dns_ip: "192.168.0.3"
+      ports:
+        - "1234:1234"
+        - "5678:5678"
+    photoprism.yml.j2:
+      password: "super_secret"
+    defaults:
+      restart: "always"
+      docker_volume_dir: "your/docker/volumes"
+      domain: "example.com"
+
+demo_2:
+  selected_templates: &demo2_selected_templates
+    media_server:
+      display_name: "Plex Media Server"
+      templates:
+        - "plex.yml.j2"
+        - "traefik.yml.j2"
+    downloads:
+      display_name: "Download Manager"
+      templates:
+        - "sabnzbd.yml.j2"
+    notes:
+      display_name: "Note Taking"
+      templates:
+        - "joplin.yml.j2"
+        - "traefik.yml.j2"
+  variables: &demo2_variables
+    traefik.yml.j2:
+      tag: "2.11"
+      restart: "unless-stopped"
+      cf_api_email: "demo@example.com"
+      cf_dns_api_token: "demo-token-1234"
+      traefik_network: "frontend"
+    plex.yml.j2:
+      tag: "latest"
+      traefik_label: "plex"
+      advertise_ip: "http://192.168.1.50:32400/"
+    sabnzbd.yml.j2:
+      tag: "stable"
+      api_key: "sab-api-key-9876"
+      host_port: "8080:8080"
+    joplin.yml.j2:
+      tag: "latest"
+      password: "notes_secret"
+    defaults:
+      restart: "always"
+      docker_volume_dir: "/srv/docker/volumes"
+      domain: "demo2.example.com"
+
+demo_3:
+  selected_templates:
+    <<: [*demo_selected_templates, *demo2_selected_templates]
+  variables:
+    <<: [*demo_variables, *demo2_variables]
+
+"""
+
+    return write(sample_config, config_file)
 
 
 def create_sample_templates(templates_dir: Path, force: bool = False) -> int:
@@ -79,8 +126,7 @@ def create_sample_templates(templates_dir: Path, force: bool = False) -> int:
         Number of templates created
     """
     sample_templates = {
-        "password_bitwarden.yml.j2": """# Compose A
-
+        "password_bitwarden.yml.j2": """
 services:
   bitwarden:
     image: vaultwarden/server:{{ tag | default('latest') }}
@@ -107,8 +153,7 @@ networks:
   proxy:
     external: true
 """,
-        "traefik.yml.j2": """# Compose A 2
-
+        "traefik.yml.j2": """
 services:
   traefik:
     image: traefik:{{ tag | default('latest') }}
@@ -185,7 +230,6 @@ networks:
     external: true
 """,
         "photoprism.yml.j2": """
-
 services:
   photoprism:
     image: photoprism/photoprism:{{ tag | default('latest')}}
@@ -237,6 +281,99 @@ networks:
 
   photos:
     external: true
+""",
+        "plex.yml.j2": """
+services:
+  plex:
+    image: plexinc/pms-docker:{{ tag | default('latest') }}
+    container_name: {{ name | default('plex') }}
+    restart: {{ restart | default('unless-stopped') }}
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - proxy
+    environment:
+      - ADVERTISE_IP={{ advertise_ip | default('') }}
+    volumes:
+      - {{ docker_volume_dir }}/plex:/config
+      - /mnt/media:/data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.{{ traefik_label }}.entrypoints=http"
+      - "traefik.http.routers.{{ traefik_label }}.rule=Host(`{{ traefik_label }}.{{ domain }}`)"
+      - "traefik.http.middlewares.{{ traefik_label }}-https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.routers.{{ traefik_label }}.middlewares={{ traefik_label }}-https-redirect"
+      - "traefik.http.routers.{{ traefik_label }}-secure.entrypoints=https"
+      - "traefik.http.routers.{{ traefik_label }}-secure.rule=Host(`{{ traefik_label }}.{{ domain }}`)"
+      - "traefik.http.routers.{{ traefik_label }}-secure.tls=true"
+      - "traefik.docker.network=proxy"
+
+networks:
+  proxy:
+    external: true
+""",
+        "sabnzbd.yml.j2": """
+services:
+  sabnzbd:
+    image: linuxserver/sabnzbd:{{ tag | default('stable') }}
+    container_name: {{ name | default('sabnzbd') }}
+    restart: {{ restart | default('unless-stopped') }}
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - proxy
+    environment:
+      - API_KEY={{ api_key }}
+    ports:
+      - "{{ host_port }}"
+    volumes:
+      - {{ docker_volume_dir }}/sabnzbd:/config
+      - /mnt/downloads:/downloads
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.{{ traefik_label | default('sabnzbd') }}.entrypoints=http"
+      - "traefik.http.routers.{{ traefik_label | default('sabnzbd') }}.rule=Host(`{{ traefik_label | default('sabnzbd') }}.{{ domain }}`)"
+      - "traefik.http.middlewares.{{ traefik_label | default('sabnzbd') }}-https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.routers.{{ traefik_label | default('sabnzbd') }}.middlewares={{ traefik_label | default('sabnzbd') }}-https-redirect"
+      - "traefik.http.routers.{{ traefik_label | default('sabnzbd') }}-secure.entrypoints=https"
+      - "traefik.http.routers.{{ traefik_label | default('sabnzbd') }}-secure.rule=Host(`{{ traefik_label | default('sabnzbd') }}.{{ domain }}`)"
+      - "traefik.http.routers.{{ traefik_label | default('sabnzbd') }}-secure.tls=true"
+      - "traefik.docker.network=proxy"
+
+networks:
+  proxy:
+    external: true
+""",
+        "joplin.yml.j2": """
+services:
+  joplin:
+    image: joplin/server:{{ tag | default('latest') }}
+    container_name: {{ name | default('joplin') }}
+    restart: {{ restart | default('unless-stopped') }}
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - proxy
+    environment:
+      - APP_BASE_URL=https://{{ traefik_label | default('joplin') }}.{{ domain }}
+      - APP_PORT=22300
+      - POSTGRES_PASSWORD={{ password }}
+    volumes:
+      - {{ docker_volume_dir }}/joplin:/var/lib/joplin
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.{{ traefik_label | default('joplin') }}.entrypoints=http"
+      - "traefik.http.routers.{{ traefik_label | default('joplin') }}.rule=Host(`{{ traefik_label | default('joplin') }}.{{ domain }}`)"
+      - "traefik.http.middlewares.{{ traefik_label | default('joplin') }}-https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.routers.{{ traefik_label | default('joplin') }}.middlewares={{ traefik_label | default('joplin') }}-https-redirect"
+      - "traefik.http.routers.{{ traefik_label | default('joplin') }}-secure.entrypoints=https"
+      - "traefik.http.routers.{{ traefik_label | default('joplin') }}-secure.rule=Host(`{{ traefik_label | default('joplin') }}.{{ domain }}`)"
+      - "traefik.http.routers.{{ traefik_label | default('joplin') }}-secure.tls=true"
+      - "traefik.docker.network=proxy"
+
+networks:
+  proxy:
+    external: true
 """
     }
 
@@ -250,15 +387,21 @@ networks:
             logger.info(f"Template {filename} already exists, skipping")
             continue
 
-        try:
-            with open(template_path, "w") as f:
-                f.write(content)
-            logger.info(f"Created sample template: {filename}")
-            created_count += 1
-        except Exception as e:
-            logger.error(f"Failed to create template {filename}: {e}")
+        if (write(content, template_path)):
+          created_count += 1
 
     return created_count
+
+
+def write(content: str, template_path: Path) -> bool:
+    try:
+        with open(template_path, "w") as f:
+            f.write(content)
+        logger.info(f"Created sample file: {template_path}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to create file {template_path}: {e}")
+        return False
 
 
 def get_template_variables_from_content(content: str) -> Dict[str, Optional[str]]:

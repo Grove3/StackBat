@@ -12,7 +12,12 @@ import logging
 from dataclasses import dataclass, field
 
 from ..core.compose_generator import ComposeGenerator, GenerationResult
-from ..core.templates import create_sample_config, ConfigType, ConfigVariables, TemplateInfo
+from ..core.templates import (
+    create_sample_config,
+    ConfigType,
+    ConfigVariables,
+    TemplateInfo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +25,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ValidationResult:
     """Result of template and variable validation"""
+
     success: bool = False
     missing_templates: List[str] = field(default_factory=list)
     variable_errors: List[str] = field(default_factory=list)
@@ -30,7 +36,9 @@ class ValidationResult:
 class ComposeManager:
     """Core class for managing Compose templates"""
 
-    def __init__(self, templates_dir: Optional[str] = None, config_file: Optional[str] = None):
+    def __init__(
+        self, templates_dir: Optional[str] = None, config_file: Optional[str] = None
+    ):
         """
         Initialize the Compose Manager
 
@@ -39,8 +47,8 @@ class ComposeManager:
             config_file: Path to configuration file for saved configurations
         """
         self.templates_dir = Path(templates_dir or "templates")
-        self.config_file = Path(config_file or "dcm_configurations.json")
-        self.sample_config_file = Path("sample_configuration.json")
+        self.config_file = Path(config_file or "dcm_configurations.yml")
+        self.sample_config_file = Path("sample_configuration.yml")
 
         # Ensure templates directory exists
         self.templates_dir.mkdir(exist_ok=True)
@@ -49,7 +57,7 @@ class ComposeManager:
         self.jinja_env = Environment(
             loader=FileSystemLoader(self.templates_dir),
             trim_blocks=True,
-            lstrip_blocks=True
+            lstrip_blocks=True,
         )
 
         # Template categories
@@ -68,23 +76,28 @@ class ComposeManager:
         self.load_configurations()
 
     def load_configurations(self) -> None:
-        """Load saved configurations from file"""
+        """Load saved configurations from YAML file"""
         if self.config_file.exists():
             try:
-                with open(self.config_file, 'r') as f:
-                    self.configurations = json.load(f)
+                with open(self.config_file, "r") as f:
+                    self.configurations = yaml.safe_load(f)
+
                 logger.info(f"Loaded {len(self.configurations)} configurations")
             except Exception as e:
                 logger.error(f"Error loading configurations: {e}")
                 self.configurations = {}
         else:
-            logger.info("No configuration file found, starting with empty configurations")
+            logger.info(
+                "No configuration file found, starting with empty configurations"
+            )
 
     def save_configurations(self, configurations: ConfigType, location: Path) -> None:
-        """Save configurations to file"""
+        """Save configurations to YAML file"""
         try:
-            with open(location, 'w') as f:
-                json.dump(configurations, f, indent=2)
+            with open(location, "w") as f:
+                yaml.safe_dump(
+                    self.configurations, f, indent=2, default_flow_style=False
+                )
             logger.info(f"Saved {len(configurations)} configurations")
         except Exception as e:
             logger.error(f"Error saving configurations: {e}")
@@ -116,8 +129,7 @@ class ComposeManager:
         """
         all_keys = []
 
-        merged = {**self.configurations, **create_sample_config()}
-        for item in merged.values():
+        for item in self.configurations.values():
             selected = item.get("selected_templates", {})
             all_keys.extend(selected.keys())
 
@@ -164,7 +176,7 @@ class ComposeManager:
                 logger.warning(f"Template file not found: {template_file}")
                 return []
 
-            with open(template_path, 'r') as f:
+            with open(template_path, "r") as f:
                 content = f.read()
 
             # Try to render template with empty context to parse structure
@@ -173,33 +185,35 @@ class ComposeManager:
                 rendered = template.render()
                 data = yaml.safe_load(rendered)
 
-                if data and 'services' in data:
-                    return list(data['services'].keys())
+                if data and "services" in data:
+                    return list(data["services"].keys())
             except Exception as e:
-                logger.debug(f"Could not render template {template_file} for parsing: {e}")
+                logger.debug(
+                    f"Could not render template {template_file} for parsing: {e}"
+                )
 
             # Fallback: basic text parsing
             services = []
-            lines = content.split('\n')
+            lines = content.split("\n")
             in_services = False
 
             for line in lines:
                 # Skip Jinja control structures
-                if line.strip().startswith('{%') or line.strip().startswith('{{'):
+                if line.strip().startswith("{%") or line.strip().startswith("{{"):
                     continue
 
                 if not in_services:
-                    if line.strip() == 'services:':
+                    if line.strip() == "services:":
                         in_services = True
                     continue
 
                 # Stop collecting if we reach a line that is not indented or starts a new top-level section
                 if in_services:
-                    if line.startswith(' ') or line.startswith('\t'):
+                    if line.startswith(" ") or line.startswith("\t"):
                         # Count indentation
                         indent_level = len(line) - len(line.lstrip())
-                        if indent_level == 2 and ':' in line:
-                            key = line.strip().split(':')[0]
+                        if indent_level == 2 and ":" in line:
+                            key = line.strip().split(":")[0]
                             services.append(key)
                     else:
                         # We've reached a new section or end of 'services'
@@ -211,7 +225,9 @@ class ComposeManager:
             logger.error(f"Error parsing template {template_file}: {e}")
             return []
 
-    def validate_template(self, template_file: str, variables: Dict[str, Any] = {}) -> tuple[bool, str]:
+    def validate_template(
+        self, template_file: str, variables: Dict[str, Any] = {}
+    ) -> tuple[bool, str]:
         """
         Validate a template file
 
@@ -239,7 +255,9 @@ class ComposeManager:
         except Exception as e:
             return False, f"Template validation failed: {str(e)}"
 
-    def validate_templates(self, templates: List[str], parsed_variables: Dict[str, Dict[str, Any]]) -> ValidationResult:
+    def validate_templates(
+        self, templates: List[str], parsed_variables: Dict[str, Dict[str, Any]]
+    ) -> ValidationResult:
         """
         Validate templates and variables for generation
 
@@ -254,7 +272,9 @@ class ComposeManager:
 
         # Get available templates
         templates_dict = self.get_all_templates()
-        all_templates = [item for sublist in templates_dict.values() for item in sublist]
+        all_templates = [
+            item for sublist in templates_dict.values() for item in sublist
+        ]
 
         # Check template availability
         for template_file in templates:
@@ -265,26 +285,39 @@ class ComposeManager:
         self._validate_template_content(templates, parsed_variables, result)
 
         # Set overall success
-        result.success = (not result.missing_templates and
-                         not result.variable_errors and
-                         not result.template_errors)
+        result.success = (
+            not result.missing_templates
+            and not result.variable_errors
+            and not result.template_errors
+        )
 
         return result
 
-    def _validate_template_content(self, templates: List[str], variables: Dict[str, Dict[str, Any]],
-                                 result: ValidationResult) -> None:
+    def _validate_template_content(
+        self,
+        templates: List[str],
+        variables: Dict[str, Dict[str, Any]],
+        result: ValidationResult,
+    ) -> None:
         """Validate template content"""
         for template_file in templates:
-            template_vars = {**variables.get(template_file, {}), **variables.get("defaults", {})}
+            template_vars = {
+                **variables.get(template_file, {}),
+                **variables.get("defaults", {}),
+            }
             is_valid, error_msg = self.validate_template(template_file, template_vars)
             if not is_valid:
-                result.template_errors.append(f"Template '{template_file}': {error_msg}")
+                result.template_errors.append(
+                    f"Template '{template_file}': {error_msg}"
+                )
 
-    def generate_compose_file(self,
-                            templates: List[str],
-                            output_file: str = "compose.yml",
-                            variables: Dict[str, Dict[str, Any]] = {},
-                            merge_strategy: str = "overwrite") -> GenerationResult:
+    def generate_compose_file(
+        self,
+        templates: List[str],
+        output_file: str = "compose.yml",
+        variables: Dict[str, Dict[str, Any]] = {},
+        merge_strategy: str = "overwrite",
+    ) -> GenerationResult:
         """
         Generate final compose.yml from selected templates
 
@@ -298,18 +331,18 @@ class ComposeManager:
             True if generation successful, False otherwise
         """
         return self.compose_generator.generate_compose_file(
-            templates,
-            self.templates_dir,
-            output_file,
-            variables,
-            merge_strategy
+            templates, self.templates_dir, output_file, variables, merge_strategy
         )
 
     def get_configuration_names(self) -> List[str]:
         return list(self.configurations.keys())
 
-    def save_configuration(self, name: str, selected_templates: Dict[str, TemplateInfo],
-                          variables: dict[str, dict[str, Any]]) -> None:
+    def save_configuration(
+        self,
+        name: str,
+        selected_templates: Dict[str, TemplateInfo],
+        variables: dict[str, dict[str, Any]],
+    ) -> None:
         """
         Save a configuration for later use
 
@@ -318,9 +351,9 @@ class ComposeManager:
             selected_templates: Selected templates by category
             variables: Template variables
         """
-        config: ConfigVariables= {
-            'selected_templates': selected_templates.copy(),
-            'variables': variables.copy()
+        config: ConfigVariables = {
+            "selected_templates": selected_templates.copy(),
+            "variables": variables.copy(),
         }
 
         self.configurations[name] = config
