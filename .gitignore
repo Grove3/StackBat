@@ -71,8 +71,8 @@ ehthumbs.db
 Thumbs.db
 
 # Project specific
-dcm_configurations.json
-sample_configuration.json
+dcm_configurations.yml
+sample_configuration.yml
 *compose.yml
 templates/*
 *.log

@@ -14,7 +14,7 @@ import logging
 from ..cli.click_logger import ClickLogger, verbose_option, quiet_option
 from ..core.manager import ComposeManager
 from ..core.templates import create_sample_config, create_sample_templates
-from compose_manager.cli import click_logger
+
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ def check_first_run():
     "--config-file",
     "-c",
     type=click.Path(dir_okay=False, path_type=Path),
-    default=Path("dcm_configurations.json"),
+    default=Path("dcm_configurations.yml"),
     help="Configuration file for saved configurations",
 )
 @verbose_option()
@@ -440,29 +440,25 @@ def delete_config(ctx, config_name: str) -> None:
 def create_samples(ctx, force: bool) -> None:
     """Create sample template files"""
     manager: ComposeManager = ctx.obj["manager"]
+    click_logger: ClickLogger = ctx.obj["click_logger"]
     templates_dir = ctx.obj["templates_dir"]
     config_dir = manager.sample_config_file
 
     created_count = create_sample_templates(templates_dir, force)
 
     if created_count > 0:
-        click.echo(
-            click.style(
-                f"✓ Created {created_count} sample templates in {templates_dir}",
-                fg="green",
-            )
+        click_logger.success(
+            f"Created {created_count} sample templates in {templates_dir}"
         )
     else:
-        click.echo(
+        click_logger.info(
             "No sample templates created (files may already exist, use --force to overwrite)"
         )
 
-    manager.save_configurations(create_sample_config(), config_dir)
-    click.echo(
-        click.style(
-            f"✓ Sample config file has been created at: {config_dir}", fg="green"
-        )
-    )
+    if create_sample_config(config_dir, force):
+        click_logger.success(f"Sample config file has been created at: {config_dir}")
+    else:
+        click_logger.error(f"Unable to write sample config at: {config_dir}")
 
 
 @cli.command()
@@ -497,8 +493,7 @@ def validate(ctx, templates: List[str], variables: Tuple[str]) -> None:
 
         # Validate
         validation_result = manager.validate_templates(
-            templates=list(templates),
-            parsed_variables=parsed_variables
+            templates=list(templates), parsed_variables=parsed_variables
         )
 
         # Log results
