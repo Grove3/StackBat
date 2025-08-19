@@ -1,5 +1,5 @@
 """
-CLI interface for Compose Template Manager
+CLI interface for Yamble
 """
 
 from .main import main

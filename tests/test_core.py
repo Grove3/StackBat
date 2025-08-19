@@ -6,11 +6,11 @@ import pytest
 import tempfile
 import shutil
 from pathlib import Path
-from compose_manager.core.manager import ComposeManager
-from compose_manager.core.templates import create_sample_templates
+from yamble.core.manager import YambleManager
+from yamble.core.templates import create_sample_templates
 
 
-class TestComposeManager:
+class TestYambleManager:
 
     def setup_method(self):
         """Setup test environment"""
@@ -18,7 +18,7 @@ class TestComposeManager:
         self.templates_dir = self.temp_dir / "templates"
         self.config_file = self.temp_dir / "test_config.json"
 
-        self.manager = ComposeManager(
+        self.manager = YambleManager(
             templates_dir=str(self.templates_dir),
             config_file=str(self.config_file)
         )

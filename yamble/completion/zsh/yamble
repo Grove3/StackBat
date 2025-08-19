@@ -1,0 +1,2 @@
+#compdef yamble
+eval "$(_YAMBLE_COMPLETE=zsh_source yamble)"

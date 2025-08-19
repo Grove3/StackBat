@@ -17,7 +17,7 @@ try:
 except ImportError:
     GUI_AVAILABLE = False
 
-from ..core.manager import ComposeManager
+from ..core.manager import YambleManager
 from ..core.templates import create_sample_templates
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ class DockerComposeGUI:
         if not GUI_AVAILABLE:
             raise ImportError("GUI not available. CustomTkinter is required for GUI mode.")
 
-        self.manager = ComposeManager(
+        self.manager = YambleManager(
             templates_dir=templates_dir,
             config_file=config_file
         )

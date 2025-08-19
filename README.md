@@ -16,18 +16,18 @@ A powerful CLI and GUI tool for managing Compose templates using Jinja2 templati
 
 ### Basic Installation (CLI only)
 ```bash
-pip install compose-manager
+pip install yamble
 ```
 
 ### Full Installation (CLI + GUI)
 ```bash
-pip install compose-manager[gui]
+pip install yamble[gui]
 ```
 
 ### Development Installation
 ```bash
-git clone git@bitbucket.org:grove_3/compose-manager.git
-cd compose-manager
+git clone git@bitbucket.org:grove_3/yamble.git
+cd yamble
 python3 -m venv venv
 source venv/bin/activate
 pip install -e .[dev,gui]
@@ -37,27 +37,27 @@ pip install -e .[dev,gui]
 
 ### Create Sample Templates
 ```bash
-compose-manager create-samples
+yamble create-samples
 ```
 
 ### CLI Usage
 ```bash
 # List available templates
-compose-manager list-templates
+yamble list-templates
 
 # Interactive mode
-compose-manager interactive
+yamble interactive
 
 # Direct generation
-compose-manager generate -T flight:flight_core.yml.j2 -V flight_version=v2.1 -o my-compose.yml
+yamble generate -T flight:flight_core.yml.j2 -V flight_version=v2.1 -o my-compose.yml
 
 # Use saved configuration
-compose-manager use-config my-config
+yamble use-config my-config
 ```
 
 ### GUI Usage
 ```bash
-compose-manager-gui
+yamble-gui
 ```
 
 ## Template Categories

@@ -1,0 +1,2 @@
+#!/bin/bash
+eval "$(_YAMBLE_COMPLETE=bash_source yamble)"

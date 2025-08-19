@@ -3,12 +3,12 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "compose-manager"
+name = "yamble"
 version = "0.1.0"
 authors = [
     {name = "Stephen Grove", email = "grove_3@hotmail.com"},
 ]
-description = "A CLI and GUI tool for managing Compose templates using Jinja2"
+description = "A CLI and GUI tool for managing compose templates using Jinja2"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.9"
@@ -26,7 +26,7 @@ classifiers = [
     "Topic :: System :: Systems Administration",
     "Topic :: Utilities",
 ]
-keywords = ["docker", "docker-compose", "compose", "jinja2", "templates", "cli", "gui"]
+keywords = ["docker", "docker-compose", "compose", "jinja2", "templates", "cli", "gui", "yamble"]
 dependencies = [
     "jinja2>=3.0.0",
     "pyyaml>=6.0",
@@ -51,24 +51,24 @@ docs = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/yourusername/compose-manager"
-"Bug Reports" = "https://github.com/yourusername/compose-manager/issues"
-"Source" = "https://github.com/yourusername/compose-manager"
-"Documentation" = "https://compose-manager.readthedocs.io/"
+"Homepage" = "https://github.com/Grove3/yamble/"
+"Bug Reports" = "https://github.com/Grove3/yamble/issues"
+"Source" = "https://github.com/Grove3/yamble/"
+"Documentation" = "https://github.com/Grove3/yamble/"
 
 [project.scripts]
-compose-manager = "compose_manager.cli.main:main"
-dcm = "compose_manager.cli.main:main"
+yamble = "yamble.cli.main:main"
+dcm = "yamble.cli.main:main"
 
 [project.gui-scripts]
-compose-manager-gui = "compose_manager.gui.main:main"
+yamble-gui = "yamble.gui.main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["compose_manager*"]
+include = ["yamble*"]
 
 [tool.setuptools.package-data]
-compose_manager = ["completion/bash/*", "completion/zsh/*"]
+yamble = ["completion/bash/*", "completion/zsh/*"]
 
 [tool.black]
 line-length = 88
@@ -115,7 +115,7 @@ python_files = [
 ]
 
 [tool.coverage.run]
-source = ["compose_manager"]
+source = ["yamble"]
 omit = [
     "*/tests/*",
     "*/test_*",

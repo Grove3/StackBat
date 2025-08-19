@@ -3,24 +3,24 @@
 ## Installation
 
 ```bash
-pip install compose-manager
+pip install yamble
 ```
 
 ## Basic Commands
 
 ### List Available Templates
 ```bash
-compose-manager list-templates
+yamble list-templates
 ```
 
 ### Interactive Mode
 ```bash
-compose-manager interactive
+yamble interactive
 ```
 
 ### Generate Compose File
 ```bash
-compose-manager generate \
+yamble generate \
   -T flight:flight_core.yml.j2 \
   -T hatp:hatp_services.yml.j2 \
   -V flight_version=v2.1 \
@@ -30,39 +30,39 @@ compose-manager generate \
 
 ### Validate Templates
 ```bash
-compose-manager validate -T flight_core.yml.j2 -V flight_version=v2.1
+yamble validate -T flight_core.yml.j2 -V flight_version=v2.1
 ```
 
 ### Configuration Management
 ```bash
 # List saved configurations
-compose-manager list-configs
+yamble list-configs
 
 # Use saved configuration
-compose-manager use-config production-config
+yamble use-config production-config
 
 # Delete configuration
-compose-manager delete-config old-config
+yamble delete-config old-config
 ```
 
 ### Create Sample Templates
 ```bash
-compose-manager create-samples --force
+yamble create-samples --force
 ```
 
 ## Advanced Usage
 
 ### Custom Templates Directory
 ```bash
-compose-manager --templates-dir /path/to/templates list-templates
+yamble --templates-dir /path/to/templates list-templates
 ```
 
 ### Custom Configuration File
 ```bash
-compose-manager --config-file /path/to/config.json interactive
+yamble --config-file /path/to/config.json interactive
 ```
 
 ### Verbose Output
 ```bash
-compose-manager --verbose generate -T flight:flight_core.yml.j2
+yamble --verbose generate -T flight:flight_core.yml.j2
 ```

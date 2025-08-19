@@ -1,3 +1,3 @@
 """
-Tests for Compose Template Manager
+Tests for Yamble
 """
