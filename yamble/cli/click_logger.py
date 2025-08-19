@@ -4,7 +4,7 @@ Click logging utilities for Compose generation results
 
 import sys
 import click
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any
 from ..core.manager import ValidationResult
 from ..core.compose_generator import GenerationResult
 from ..core.templates import ConfigType

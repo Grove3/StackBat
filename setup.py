@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Setup configuration for Compose Manager
+Setup configuration for Yamble
 """
 
 from setuptools import setup, find_packages
@@ -41,14 +41,14 @@ extras_require = {
 extras_require['all'] = list(set(sum(extras_require.values(), [])))
 
 setup(
-    name='compose-manager',
+    name='yamble',
     version='0.1.0',
     author='Stephen Grove',
     author_email='grove_3@hotmail.com',
     description='A CLI and GUI tool for managing Compose templates using Jinja2',
     long_description=long_description,
     long_description_content_type='text/markdown',
-    url='https://github.com/yourusername/compose-manager',
+    url='https://github.com/yourusername/yamble',
     packages=find_packages(),
     include_package_data=True,
     install_requires=install_requires,
@@ -70,17 +70,17 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'compose-manager=compose_manager.cli.main:main',
-            'dcm=compose_manager.cli.main:main',  # Short alias
+            'yamble=yamble.cli.main:main',
+            'dcm=yamble.cli.main:main',  # Short alias
         ],
         'gui_scripts': [
-            'compose-manager-gui=compose_manager.gui.main:main [gui]',
+            'yamble-gui=yamble.gui.main:main [gui]',
         ],
     },
-    keywords='docker docker-compose compose jinja2 templates cli gui',
+    keywords='docker docker-compose compose jinja2 templates cli gui, yamble',
     project_urls={
-        'Bug Reports': 'https://github.com/yourusername/compose-manager/issues',
-        'Source': 'https://github.com/yourusername/compose-manager',
-        'Documentation': 'https://compose-manager.readthedocs.io/',
+        'Bug Reports': 'https://github.com/Grove3/yamble/issues',
+        'Source': 'https://github.com/Grove3/yamble/',
+        'Documentation': 'https://github.com/Grove3/yamble/',
     },
 )

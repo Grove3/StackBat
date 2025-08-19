@@ -7,8 +7,8 @@ import tempfile
 import shutil
 from pathlib import Path
 from click.testing import CliRunner
-from compose_manager.cli.main import cli
-from compose_manager.core.templates import create_sample_templates
+from yamble.cli.main import cli
+from yamble.core.templates import create_sample_templates
 
 
 class TestCLI:

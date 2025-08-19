@@ -3,13 +3,13 @@
 ## Installation
 
 ```bash
-pip install compose-manager[gui]
+pip install yamble[gui]
 ```
 
 ## Launching the GUI
 
 ```bash
-compose-manager-gui
+yamble-gui
 ```
 
 ## Interface Overview

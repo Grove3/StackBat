@@ -1,2 +1,0 @@
-#compdef compose-manager
-eval "$(_COMPOSE_MANAGER_COMPLETE=zsh_source compose-manager)"

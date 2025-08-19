@@ -10,7 +10,7 @@ from typing import Dict, List, Tuple, Any
 import logging
 
 from ..cli.click_logger import ClickLogger, verbose_option, quiet_option
-from ..core.manager import ComposeManager
+from ..core.manager import YambleManager
 from ..core.templates import create_sample_config, create_sample_templates
 
 
@@ -31,7 +31,7 @@ def check_first_run():
     """Check if this is first run and install completion"""
     # Skip if completion is already working
 
-    config_dir = os.path.expanduser("~/.config/compose-manager/")
+    config_dir = os.path.expanduser("~/.config/yamble/")
     first_run_marker = os.path.join(config_dir, "completion_installed")
 
     if not os.path.exists(first_run_marker):
@@ -105,7 +105,7 @@ def cli(
     ctx.obj["config_file"] = config_file
     ctx.obj["verbose"] = verbose
     ctx.obj["quiet"] = quiet
-    ctx.obj["manager"] = ComposeManager(
+    ctx.obj["manager"] = YambleManager(
         templates_dir=str(templates_dir), config_file=str(config_file)
     )
     ctx.obj["click_logger"] = ClickLogger(verbose, quiet)
@@ -128,7 +128,7 @@ def install_completion():
 @click.pass_context
 def list_templates(ctx) -> None:
     """List all available templates organized by category"""
-    manager: ComposeManager = ctx.obj["manager"]
+    manager: YambleManager = ctx.obj["manager"]
     templates = manager.get_all_templates()
     click_logger: ClickLogger = ctx.obj["click_logger"]
 
@@ -150,7 +150,7 @@ def list_templates(ctx) -> None:
 @click.pass_context
 def interactive(ctx, output: str) -> None:
     """Interactive template selection and compose file generation"""
-    manager: ComposeManager = ctx.obj["manager"]
+    manager: YambleManager = ctx.obj["manager"]
     click_logger: ClickLogger = ctx.obj["click_logger"]
 
     try:
@@ -252,7 +252,7 @@ def generate(
 ) -> None:
     """Generate compose file from specified templates"""
     # Initialize the click logger
-    manager: ComposeManager = ctx.obj["manager"]
+    manager: YambleManager = ctx.obj["manager"]
     click_logger: ClickLogger = ctx.obj["click_logger"]
     # templates_dict = manager.get_all_templates()
 
@@ -306,7 +306,7 @@ def generate(
 @click.pass_context
 def list_configs(ctx) -> None:
     """List saved configurations"""
-    manager: ComposeManager = ctx.obj["manager"]
+    manager: YambleManager = ctx.obj["manager"]
     click_logger: ClickLogger = ctx.obj["click_logger"]
     configs = manager.list_configurations()
 
@@ -329,7 +329,7 @@ def list_configs(ctx) -> None:
 @click.pass_context
 def use_config(ctx, config_name: str, output: str, merge_strategy: str) -> None:
     """Generate compose file using a saved configuration"""
-    manager: ComposeManager = ctx.obj["manager"]
+    manager: YambleManager = ctx.obj["manager"]
     click_logger: ClickLogger = ctx.obj["click_logger"]
 
     try:
@@ -395,7 +395,7 @@ def use_config(ctx, config_name: str, output: str, merge_strategy: str) -> None:
 @click.pass_context
 def delete_config(ctx, config_name: str) -> None:
     """Delete a saved configuration"""
-    manager: ComposeManager = ctx.obj["manager"]
+    manager: YambleManager = ctx.obj["manager"]
 
     if not config_name:
         # List available configurations
@@ -433,7 +433,7 @@ def delete_config(ctx, config_name: str) -> None:
 @click.pass_context
 def create_samples(ctx, force: bool) -> None:
     """Create sample template files"""
-    manager: ComposeManager = ctx.obj["manager"]
+    manager: YambleManager = ctx.obj["manager"]
     click_logger: ClickLogger = ctx.obj["click_logger"]
     templates_dir = ctx.obj["templates_dir"]
     config_dir = manager.sample_config_file
@@ -474,7 +474,7 @@ def create_samples(ctx, force: bool) -> None:
 @click.pass_context
 def validate(ctx, templates: List[str], variables: Tuple[str]) -> None:
     """Validate templates and variables"""
-    manager: ComposeManager = ctx.obj["manager"]
+    manager: YambleManager = ctx.obj["manager"]
     click_logger: ClickLogger = ctx.obj["click_logger"]
 
     try:
@@ -505,7 +505,7 @@ def validate(ctx, templates: List[str], variables: Tuple[str]) -> None:
         sys.exit(1)
 
 
-def interactive_template_selection(manager: ComposeManager) -> Dict[str, List[str]]:
+def interactive_template_selection(manager: YambleManager) -> Dict[str, List[str]]:
     """Interactive template selection interface"""
     templates = manager.get_all_templates()
     selected = {}
@@ -559,7 +559,7 @@ def interactive_template_selection(manager: ComposeManager) -> Dict[str, List[st
 
     return selected
 
-def get_template_variables_interactive(manager: ComposeManager, templates: List[str]) -> Dict[str, Dict[str, Any]]:
+def get_template_variables_interactive(manager: YambleManager, templates: List[str]) -> Dict[str, Dict[str, Any]]:
     """Get template variables through interactive prompts until they are all valid."""
     new_variables = {}
 

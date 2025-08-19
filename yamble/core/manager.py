@@ -29,7 +29,7 @@ class ValidationResult:
     parsed_variables: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
 
-class ComposeManager:
+class YambleManager:
     """Core class for managing Compose templates"""
 
     def __init__(
