@@ -2,21 +2,17 @@
 Core Compose Manager functionality
 """
 
-from email.policy import default
-import json
 import yaml
+import logging
 from pathlib import Path
 from typing import Dict, List, Any, Optional
-from jinja2 import Environment, FileSystemLoader
-import logging
+from jinja2 import Environment, FileSystemLoader, meta, nodes
 from dataclasses import dataclass, field
 
 from ..core.compose_generator import ComposeGenerator, GenerationResult
 from ..core.templates import (
-    create_sample_config,
     ConfigType,
-    ConfigVariables,
-    TemplateInfo,
+    ConfigVariables
 )
 
 logger = logging.getLogger(__name__)
@@ -30,7 +26,7 @@ class ValidationResult:
     missing_templates: List[str] = field(default_factory=list)
     variable_errors: List[str] = field(default_factory=list)
     template_errors: List[str] = field(default_factory=list)
-    parsed_variables: Dict[str, Any] = field(default_factory=dict)
+    parsed_variables: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
 
 class ComposeManager:
@@ -340,7 +336,7 @@ class ComposeManager:
     def save_configuration(
         self,
         name: str,
-        selected_templates: Dict[str, TemplateInfo],
+        selected_templates: dict[str, dict[str, Any]],
         variables: dict[str, dict[str, Any]],
     ) -> None:
         """
@@ -404,3 +400,40 @@ class ComposeManager:
         else:
             logger.warning(f"Configuration not found for deletion: {name}")
             return False
+
+    def get_jinja_template_vars(self, template_name: str) -> Dict[str, Any]:
+        # Load template source
+        source, _, _ = self.jinja_env.loader.get_source(self.jinja_env, template_name)
+
+        parsed_content = self.jinja_env.parse(source)
+
+        defaults_map = {}
+
+        def walk(node):
+            if isinstance(node, nodes.Filter) and node.name == "default":
+                # The thing being filtered should be a Name node
+                if isinstance(node.node, nodes.Name):
+                    var_name = node.node.name
+                    if node.args:  # Default filter has an argument
+                        default_val_node = node.args[0]
+                        if isinstance(default_val_node, nodes.Const):
+                            defaults_map[var_name] = default_val_node.value
+                        else:
+                            defaults_map[var_name] = f"<dynamic:{type(default_val_node).__name__}>"
+            # Recursively walk child nodes
+            for field_name in node.fields:
+                child = getattr(node, field_name)
+                if isinstance(child, list):
+                    for item in child:
+                        if isinstance(item, nodes.Node):
+                            walk(item)
+                elif isinstance(child, nodes.Node):
+                    walk(child)
+
+        walk(parsed_content)
+
+        all_vars = meta.find_undeclared_variables(parsed_content)
+        required = [var for var in all_vars if var not in defaults_map.keys()]
+
+        final_map = {"defaults": defaults_map, "required": required}
+        return final_map

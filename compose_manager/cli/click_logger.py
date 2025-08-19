@@ -155,8 +155,9 @@ class ClickLogger:
                 self.error(f"Template not found: {template}")
 
         if validation_result.variable_errors:
+            self.error("The following variables input have errors, please check and try again:")
             for error in validation_result.variable_errors:
-                self.error(error)
+                click.echo(f"   {error}")
 
         if validation_result.template_errors:
             for error in validation_result.template_errors:

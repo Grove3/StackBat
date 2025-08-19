@@ -2,13 +2,11 @@
 CLI interface for Compose Manager
 """
 
-from ast import Try
-from email.policy import default
 import os
 import sys
 import click
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Tuple, Any
 import logging
 
 from ..cli.click_logger import ClickLogger, verbose_option, quiet_option
@@ -149,75 +147,71 @@ def list_templates(ctx) -> None:
 
 @cli.command()
 @click.option("--output", "-o", default="compose.yml", help="Output file path")
-@click.option(
-    "--var",
-    "-V",
-    "variables",
-    multiple=True,
-    help="Template variables in key=value format",
-)
-@click.option("--config", "-C", "config_name", help="Use saved configuration")
 @click.pass_context
-def interactive(
-    ctx, output: str, variables: Tuple[str], config_name: Optional[str]
-) -> None:
+def interactive(ctx, output: str) -> None:
     """Interactive template selection and compose file generation"""
     manager: ComposeManager = ctx.obj["manager"]
+    click_logger: ClickLogger = ctx.obj["click_logger"]
 
-    # Load configuration if specified
-    if config_name:
-        config = manager.load_configuration(config_name)
-        if not config:
-            click.echo(
-                click.style(f"Configuration '{config_name}' not found", fg="red")
-            )
+    try:
+        templates = interactive_template_selection(manager)
+
+        # Generate compose file
+        if not templates:
+            click_logger.error("No templates selected!")
             sys.exit(1)
 
-        selected_templates = config.get("selected_templates", {})
-        template_vars = config.get("variables", {})
-        click.echo(click.style(f"Loaded configuration: {config_name}", fg="green"))
-    else:
-        selected_templates = interactive_template_selection(manager)
-        template_vars = {}
+        templates_list = []
+        for value in templates.values():
+            templates_list.extend(value)
 
-    # Parse additional variables from command line
-    for var in variables:
-        if "=" in var:
-            key, value = var.split("=", 1)
-            template_vars[key] = value
-        else:
-            click.echo(
-                click.style(f"Invalid variable format: {var} (use key=value)", fg="red")
-            )
-            sys.exit(1)
+        parse_variables = get_template_variables_interactive(manager, templates_list)
 
-    # Get additional variables interactively if none provided
-    if not template_vars and not config_name:
-        template_vars = get_template_variables_interactive()
-
-    # Generate compose file
-    if not selected_templates:
-        click.echo(click.style("No templates selected!", fg="red"))
-        sys.exit(1)
-
-    success = manager.generate_compose_file(selected_templates, output, template_vars)
-
-    if success:
-        total_services = sum(
-            len(manager.parse_template_services(t))
-            for templates in selected_templates.values()
-            for t in templates
+        # Validate request
+        click_logger.debug("Validating templates and variables")
+        validation_result = manager.validate_templates(
+            templates=templates_list, parsed_variables=parse_variables
         )
-        click.echo(click.style(f"✓ Successfully generated {output}", fg="green"))
-        click.echo(f"  Services included: {total_services}")
 
-        # Ask to save configuration
-        if not config_name and click.confirm("Save this configuration for future use?"):
-            save_name = click.prompt("Configuration name")
-            manager.save_configuration(save_name, selected_templates, template_vars)
-            click.echo(click.style(f"✓ Saved configuration: {save_name}", fg="green"))
-    else:
-        click.echo(click.style("✗ Failed to generate compose file!", fg="red"))
+        if not validation_result.success:
+            click_logger.log_validation_errors(
+                validation_result,
+                templates=manager.get_templates_simple(),
+                show_available=True,
+            )
+            sys.exit(1)
+
+        # Validation success message
+        if validation_result.success:
+            click_logger.success("All templates valid!")
+
+        result = manager.generate_compose_file(templates_list, output, parse_variables)
+
+        # Log result
+        click_logger.log_generation_result(result)
+
+        selected_templates = {
+            "defaults": {
+                "display_name": "Defaults",
+                "templates": templates_list
+            }
+        }
+
+        if result.success:
+            if click.confirm("Save this configuration for future use?"):
+                save_name = click.prompt("Configuration name")
+                manager.save_configuration(save_name, selected_templates, parse_variables)
+                click.echo(click.style(f"✓ Saved configuration: {save_name}", fg="green"))
+            sys.exit(0)
+        else:
+            click.echo(click.style("✗ Failed to generate compose file!", fg="red"))
+            sys.exit(1)
+
+    except KeyboardInterrupt:
+        click_logger.warning("Generation cancelled by user")
+        sys.exit(130)
+    except Exception as e:
+        click_logger.error(f"Unexpected error: {str(e)}")
         sys.exit(1)
 
 
@@ -565,36 +559,71 @@ def interactive_template_selection(manager: ComposeManager) -> Dict[str, List[st
 
     return selected
 
+def get_template_variables_interactive(manager: ComposeManager, templates: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Get template variables through interactive prompts until they are all valid."""
+    new_variables = {}
 
-def get_template_variables_interactive() -> Dict[str, str]:
-    """Get template variables through interactive prompts"""
-    variables = {}
-
-    click.echo("\n" + "=" * 50)
+    click.echo("\n" + "=" * 60)
     click.echo(click.style("Template Variables", bold=True, fg="blue"))
-    click.echo("=" * 50)
-    click.echo("Enter values for template variables (press Enter to skip):")
+    click.echo("=" * 60)
 
-    common_vars = [
-        ("flight_version", "Flight container version"),
-        ("flight_mode", "Flight mode (auto/manual)"),
-        ("hatp_version", "HATP container version"),
-        ("hatp_config", "HATP configuration file path"),
-        ("mission_version", "Mission system version"),
-        ("mission_mode", "Mission mode (planning/execution)"),
-        ("autonomy_version", "Autonomy system version"),
-        ("ai_mode", "AI mode (learning/inference)"),
-        ("gpu_enabled", "Enable GPU support (true/false)"),
-    ]
+    for template in templates:
+        variables = manager.get_jinja_template_vars(template)
+        required_keys = set(variables["required"])
+        allowed_keys = required_keys.union(variables["defaults"].keys())
 
-    for var_name, description in common_vars:
-        value = click.prompt(
-            f"{var_name} ({description})", default="", show_default=False
-        )
-        if value.strip():
-            variables[var_name] = value.strip()
+        click.echo(click.style(f"Template: {template}", bold=True))
+        click.echo(click.style("   Required:", fg="blue"))
+        for value in variables["required"]:
+            click.echo(f"      {value}")
 
-    return variables
+        click.echo(click.style("   Defaults:", fg="blue"))
+        for key, value in variables["defaults"].items():
+            click.echo(f"      {key}: {value}")
+
+        kv_pairs = {}
+        missing_keys = required_keys.copy()
+
+        # Keep asking until all required keys are filled and valid
+        while missing_keys:
+            click.echo(click.style(
+                f"\nEnter values for: {', '.join(sorted(missing_keys))} or change any default values", fg="yellow"
+            ))
+            user_input = click.prompt(
+                "Format: key=value, key=value",
+                type=str
+            )
+
+            invalid_keys = set()
+            for pair in user_input.split(","):
+                pair = pair.strip()
+                if not pair:
+                    continue
+                if "=" not in pair:
+                    click.echo(click.style(f"Invalid format: {pair}", fg="red"))
+                    continue
+
+                key, value = pair.split("=", 1)
+                key = key.strip()
+                value = value.strip()
+
+                if key not in allowed_keys:
+                    click.echo(click.style(f"Unrecognized key: {key}", fg="red"))
+                    continue
+
+                # Store value and mark as filled
+                kv_pairs[key] = value
+                if key in missing_keys:
+                    missing_keys.remove(key)
+
+            # If user typed invalid keys, ask again for them specifically
+            if invalid_keys:
+                missing_keys.update(invalid_keys)
+
+        new_variables[template] = kv_pairs
+        new_variables["defaults"] = variables["defaults"]
+
+    return new_variables
 
 
 def parse_variables(variables: List[str]) -> Tuple[bool, Dict[str, Any]]:

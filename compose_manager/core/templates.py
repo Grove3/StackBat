@@ -457,7 +457,7 @@ def validate_jinja_template(content: str) -> tuple[bool, str]:
         Tuple of (is_valid, error_message)
     """
     try:
-        from jinja2 import Environment, Template
+        from jinja2 import Environment
 
         # Create a basic Jinja2 environment
         env = Environment()
