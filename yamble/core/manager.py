@@ -5,17 +5,29 @@ Core Compose Manager functionality
 import yaml
 import logging
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, TypedDict
 from jinja2 import Environment, FileSystemLoader, meta, nodes
 from dataclasses import dataclass, field
 
 from ..core.compose_generator import ComposeGenerator, GenerationResult
-from ..core.templates import (
-    ConfigType,
-    ConfigVariables
-)
+
 
 logger = logging.getLogger(__name__)
+
+
+class ConfigVariables(TypedDict):
+    selected_templates: List[str]
+    variables: Dict[str, Dict[str, Any]]
+ConfigType = Dict[str, ConfigVariables]
+
+class Category(TypedDict):
+    display_name: str
+    templates: list[str]
+CategoryType = dict[str, Category]
+
+class RootType(TypedDict):
+    categories: CategoryType
+    configurations: ConfigType
 
 
 @dataclass
@@ -27,6 +39,16 @@ class ValidationResult:
     variable_errors: List[str] = field(default_factory=list)
     template_errors: List[str] = field(default_factory=list)
     parsed_variables: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+
+
+def setup_logging(verbose: bool = False) -> None:
+    """Setup logging configuration"""
+    level = logging.DEBUG if verbose else logging.WARN
+    logging.basicConfig(
+        level=level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
+    logger = logging.getLogger(__name__)
+    logger.info("Logging is set to level: %s", logging.getLevelName(level))
 
 
 class YambleManager:
@@ -44,7 +66,7 @@ class YambleManager:
         """
         self.templates_dir = Path(templates_dir or "templates")
         self.config_file = Path(config_file or "dcm_configurations.yml")
-        self.sample_config_file = Path("sample_configuration.yml")
+        self.sample_config_file = Path("sample_configurations.yml")
 
         # Ensure templates directory exists
         self.templates_dir.mkdir(exist_ok=True)
@@ -56,19 +78,14 @@ class YambleManager:
             lstrip_blocks=True,
         )
 
-        # Template categories
-        self.categories = {
-            # 'flight': 'Flight Containers',
-            # 'hatp': 'HATP Containers',
-            # 'mission_system': 'Mission System Containers',
-            # 'mission_autonomy': 'Mission Autonomy Containers'
-        }
-
         self.compose_generator = ComposeGenerator(
             self.jinja_env,
         )
 
-        self.configurations: ConfigType = {}
+        self.configurations: RootType = {
+            "categories": {},
+            "configurations": {}
+        }
         self.load_configurations()
 
     def load_configurations(self) -> None:
@@ -78,16 +95,26 @@ class YambleManager:
                 with open(self.config_file, "r") as f:
                     self.configurations = yaml.safe_load(f)
 
+                # Flatten lists
+                configs = self.configurations.get("configurations", {})
+                for key, value in configs.items():
+                    flat_templates = []
+                    for item in value.get("selected_templates", []):
+                        if isinstance(item, list):
+                            flat_templates.extend(item)
+                        else:
+                            flat_templates.append(item)
+                    value["selected_templates"] = list(set(flat_templates))
+
                 logger.info(f"Loaded {len(self.configurations)} configurations")
             except Exception as e:
                 logger.error(f"Error loading configurations: {e}")
-                self.configurations = {}
         else:
             logger.info(
                 "No configuration file found, starting with empty configurations"
             )
 
-    def save_configurations(self, configurations: ConfigType, location: Path) -> None:
+    def save_configurations(self, configurations: RootType, location: Path) -> None:
         """Save configurations to YAML file"""
         try:
             with open(location, "w") as f:
@@ -98,63 +125,46 @@ class YambleManager:
         except Exception as e:
             logger.error(f"Error saving configurations: {e}")
 
-    def get_template_files(self, category: str) -> List[str]:
-        """
-        Get available template files for a category
+    def get_category_display_name(self, category):
+        categories = self.configurations.get("categories", {})
+        if category in categories:
+            return categories[category]["display_name"]
 
-        Args:
-            category: Template category name
+        return category
 
-        Returns:
-            List of template filenames for the category
-        """
-        patterns = [f"{category}*.yml.j2", f"{category}*.yaml.j2"]
-        template_files = []
-
-        for pattern in patterns:
-            template_files.extend(self.templates_dir.glob(pattern))
-
-        return [f.name for f in template_files]
-
-    def get_all_templates(self) -> Dict[str, List[str]]:
+    def get_category_templates(self) -> Dict[str, List[str]]:
         """
         Get all available templates organized by category
 
         Returns:
             Dictionary mapping category names to lists of template files
         """
-        all_keys = []
+        available_templates = self.get_all_templates()
+        categories = self.configurations.get("categories", {})
+        category_templates = {}
 
-        for item in self.configurations.values():
-            selected = item.get("selected_templates", {})
-            all_keys.extend(selected.keys())
+        def pop_by_value(s: list, value):
+            if value in s:
+                s.remove(value)
+                return value
+            return None
 
-        # Remove duplicates
-        categories = list(set(all_keys))
+        for key, value in categories.items():
+            for template in value.get("templates", []):
+                if template in available_templates:
+                    if key in category_templates:
+                        category_templates[key].append(pop_by_value(available_templates, template))
+                    else:
+                        category_templates[key] = [pop_by_value(available_templates, template)]
 
-        templates = {
-            category: temps
-            for category in categories
-            if (temps := self.get_template_files(category))
-        }
+        category_templates['others'] = available_templates
 
-        # Handle miscellaneous category
-        all_template_files = self.get_templates_simple()
+        return category_templates
 
-        categorized_files = set()
-        for file_list in templates.values():
-            categorized_files.update(file_list)
-
-        uncategorized_files = list(all_template_files - categorized_files)
-        if uncategorized_files:
-            templates["others"] = uncategorized_files
-
-        return templates
-
-    def get_templates_simple(self) -> set[str]:
+    def get_all_templates(self) -> list[str]:
         all_template_files = set(f.name for f in self.templates_dir.glob("*.yml.j2"))
         all_template_files.update(f.name for f in self.templates_dir.glob("*.yaml.j2"))
-        return all_template_files
+        return list(all_template_files)
 
     def parse_template_services(self, template_file: str) -> List[str]:
         """
@@ -267,7 +277,7 @@ class YambleManager:
         result = ValidationResult(success=True)
 
         # Get available templates
-        templates_dict = self.get_all_templates()
+        templates_dict = self.get_category_templates()
         all_templates = [
             item for sublist in templates_dict.values() for item in sublist
         ]
@@ -331,12 +341,12 @@ class YambleManager:
         )
 
     def get_configuration_names(self) -> List[str]:
-        return list(self.configurations.keys())
+        return list(self.configurations["configurations"].keys())
 
     def save_configuration(
         self,
         name: str,
-        selected_templates: dict[str, dict[str, Any]],
+        selected_templates: List[str],
         variables: dict[str, dict[str, Any]],
     ) -> None:
         """
@@ -352,7 +362,7 @@ class YambleManager:
             "variables": variables.copy(),
         }
 
-        self.configurations[name] = config
+        self.configurations["configurations"][name] = config
         self.save_configurations(self.configurations, self.config_file)
         logger.info(f"Saved configuration: {name}")
 
@@ -366,9 +376,9 @@ class YambleManager:
         Returns:
             Configuration dictionary or None if not found
         """
-        if name in self.configurations:
+        if name in self.configurations["configurations"]:
             logger.info(f"Loaded configuration: {name}")
-            return self.configurations[name].copy()
+            return self.configurations["configurations"][name].copy()
         else:
             logger.warning(f"Configuration not found: {name}")
             return None
@@ -380,7 +390,7 @@ class YambleManager:
         Returns:
             List of configuration names
         """
-        return list(self.configurations.keys())
+        return list(self.configurations["configurations"].keys())
 
     def delete_configuration(self, name: str) -> bool:
         """
@@ -392,8 +402,8 @@ class YambleManager:
         Returns:
             True if deleted, False if not found
         """
-        if name in self.configurations:
-            del self.configurations[name]
+        if name in self.configurations["configurations"]:
+            del self.configurations["configurations"][name]
             self.save_configurations(self.configurations, self.config_file)
             logger.info(f"Deleted configuration: {name}")
             return True

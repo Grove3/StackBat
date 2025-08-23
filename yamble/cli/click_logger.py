@@ -5,9 +5,8 @@ Click logging utilities for Compose generation results
 import sys
 import click
 from typing import List, Dict, Any
-from ..core.manager import ValidationResult
+from ..core.manager import ValidationResult, ConfigType
 from ..core.compose_generator import GenerationResult
-from ..core.templates import ConfigType
 
 
 class ClickLogger:
@@ -134,9 +133,8 @@ class ClickLogger:
                 selected = config.get("selected_templates", {})
                 if selected:
                     click.echo(click.style("  Templates:", fg='yellow'))
-                    for category, value in selected.items():
-                        display_name = value.get("display_name", category)
-                        click.echo(f"    {display_name}: {', '.join(value.get('templates'))}")
+                    for template in selected:
+                        click.echo(f"    {template}")
 
                 # Show variables
                 variables = config.get("variables", {})
