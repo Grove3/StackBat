@@ -3,112 +3,93 @@ Template management utilities
 """
 
 from pathlib import Path
-from typing import Dict, Optional, TypedDict, Any, List
+from typing import Dict, Optional, Any
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-class TemplateInfo(TypedDict):
-    display_name: str
-    templates: List[str]
-
-
-class ConfigVariables(TypedDict):
-    selected_templates: Dict[str, TemplateInfo]
-    variables: Dict[str, Dict[str, Any]]
-
-
-ConfigType = Dict[str, ConfigVariables]
-
-
-
 def create_sample_config(config_file: Path, force: bool = False) -> bool:
     sample_config = """
-demo:
-  selected_templates: &demo_selected_templates
-    password:
-      display_name: "Password Manager"
-      templates:
-        - "traefik.yml.j2"
-        - "password_bitwarden.yml.j2"
-    torrents:
-      display_name: "Torrents"
-      templates:
-        - "torrents_pia_vpn.yml.j2"
-    photo:
-      display_name: "Photo Prism"
-      templates:
-        - "photoprism.yml.j2"
-        - "traefik.yml.j2"
-  variables: &demo_variables
-    traefik.yml.j2:
-      tag: "latest"
-      restart: "unless-stopped"
-      cf_api_email: "user@example.com"
-      cf_dns_api_token: "your-token-here"
-      traefik_network: "proxy"
-    password_bitwarden.yml.j2:
-      tag: "local"
-      traefik_label: "bitwarden"
-    torrents_pia_vpn.yml.j2:
-      local_ip: "192.168.0.3"
-      dns_ip: "192.168.0.3"
-      ports:
-        - "1234:1234"
-        - "5678:5678"
-    photoprism.yml.j2:
-      password: "super_secret"
-    defaults:
-      restart: "always"
-      docker_volume_dir: "your/docker/volumes"
-      domain: "example.com"
+categories:
+  password:
+    display_name: Password
+    templates:
+      - bitwarden.yml.j2
+      - traefik.yml.j2
+  media:
+    display_name: Media
+    templates:
+      - pia_vpn.yml.j2
+      - plex.yml.j2
+      - sabnzbd.yml.j2
 
-demo_2:
-  selected_templates: &demo2_selected_templates
-    media_server:
-      display_name: "Plex Media Server"
-      templates:
-        - "plex.yml.j2"
-        - "traefik.yml.j2"
-    downloads:
-      display_name: "Download Manager"
-      templates:
-        - "sabnzbd.yml.j2"
-    notes:
-      display_name: "Note Taking"
-      templates:
-        - "joplin.yml.j2"
-        - "traefik.yml.j2"
-  variables: &demo2_variables
-    traefik.yml.j2:
-      tag: "2.11"
-      restart: "unless-stopped"
-      cf_api_email: "demo@example.com"
-      cf_dns_api_token: "demo-token-1234"
-      traefik_network: "frontend"
-    plex.yml.j2:
-      tag: "latest"
-      traefik_label: "plex"
-      advertise_ip: "http://192.168.1.50:32400/"
-    sabnzbd.yml.j2:
-      tag: "stable"
-      api_key: "sab-api-key-9876"
-      host_port: "8080:8080"
-    joplin.yml.j2:
-      tag: "latest"
-      password: "notes_secret"
-    defaults:
-      restart: "always"
-      docker_volume_dir: "/srv/docker/volumes"
-      domain: "demo2.example.com"
+configurations:
+  demo:
+    selected_templates: &demo_selected_templates
+      - "traefik.yml.j2"
+      - "bitwarden.yml.j2"
+      - "pia_vpn.yml.j2"
+      - "photoprism.yml.j2"
+      - "traefik.yml.j2"
+    variables: &demo_variables
+      traefik.yml.j2:
+        tag: "latest"
+        restart: "unless-stopped"
+        cf_api_email: "user@example.com"
+        cf_dns_api_token: "your-token-here"
+        traefik_network: "proxy"
+      bitwarden.yml.j2:
+        tag: "local"
+        traefik_label: "bitwarden"
+      pia_vpn.yml.j2:
+        local_ip: "192.168.0.3"
+        dns_ip: "192.168.0.3"
+        ports:
+          - "1234:1234"
+          - "5678:5678"
+      photoprism.yml.j2:
+        password: "super_secret"
+      defaults:
+        restart: "always"
+        docker_volume_dir: "your/docker/volumes"
+        domain: "example.com"
 
-demo_3:
-  selected_templates:
-    <<: [*demo_selected_templates, *demo2_selected_templates]
-  variables:
-    <<: [*demo_variables, *demo2_variables]
+  demo_2:
+    selected_templates: &demo2_selected_templates
+      - "plex.yml.j2"
+      - "traefik.yml.j2"
+      - "sabnzbd.yml.j2"
+      - "joplin.yml.j2"
+      - "traefik.yml.j2"
+    variables: &demo2_variables
+      traefik.yml.j2:
+        tag: "2.11"
+        restart: "unless-stopped"
+        cf_api_email: "demo@example.com"
+        cf_dns_api_token: "demo-token-1234"
+        traefik_network: "frontend"
+      plex.yml.j2:
+        tag: "latest"
+        traefik_label: "plex"
+        advertise_ip: "http://192.168.1.50:32400/"
+      sabnzbd.yml.j2:
+        tag: "stable"
+        api_key: "sab-api-key-9876"
+        host_port: "8080:8080"
+      joplin.yml.j2:
+        tag: "latest"
+        password: "notes_secret"
+      defaults:
+        restart: "always"
+        docker_volume_dir: "/srv/docker/volumes"
+        domain: "demo2.example.com"
 
+  demo_3:
+    selected_templates:
+      [*demo_selected_templates, *demo2_selected_templates]
+    variables:
+      <<: [*demo_variables, *demo2_variables]
 """
 
     return write(sample_config, config_file)
@@ -126,7 +107,7 @@ def create_sample_templates(templates_dir: Path, force: bool = False) -> int:
         Number of templates created
     """
     sample_templates = {
-        "password_bitwarden.yml.j2": """
+        "bitwarden.yml.j2": """
 services:
   bitwarden:
     image: vaultwarden/server:{{ tag | default('latest') }}
@@ -201,7 +182,7 @@ networks:
   proxy:
     external: true
 """,
-        "torrents_pia_vpn.yml.j2": """
+        "pia_vpn.yml.j2": """
 services:
   pia-vpn:
     image: {{ image | default('grove/pia-openvpn:v1') }}
@@ -472,49 +453,3 @@ def validate_jinja_template(content: str) -> tuple[bool, str]:
 
     except Exception as e:
         return False, f"Template syntax error: {str(e)}"
-
-
-def get_sample_variables() -> Dict[str, Dict[str, Any]]:
-    """
-    Get sample variable values for testing templates
-
-    Returns:
-        Dictionary of sample variable values
-    """
-    return {
-        "compose_a.yml.j2": {
-            "image": "nginx:alpine",
-            "ports": ["8081:80", "8443:443"],
-            "use_network": True,
-            "network_name": "custom_net",
-        },
-        "compose_a_2.yml.j2": {
-            "image": "python:3.11-slim",
-            "container_name": "custom_a2_container",
-            "ports": ["8080:80", "8443:443"],
-            "environment": {"ENV": "staging", "DEBUG": "true"},
-            "volumes": ["/host/app:/app", "/host/logs:/logs"],
-            "restart": "on-failure",
-            "image_b": "postgres:15-alpine",
-            "container_name_b": "custom_b2_container",
-            "ports_b": ["5432:5432"],
-            "environment_b": {
-                "POSTGRES_PASSWORD": "supersecret",
-                "POSTGRES_USER": "admin",
-            },
-            "volumes_b": ["/host/dbdata:/var/lib/postgresql/data"],
-            "restart_b": "unless-stopped",
-        },
-        "compose_b.yml.j2": {
-            "image": "python:3.11-slim",
-            "environment": {"VAR1": "value_from_env", "DEBUG": "true"},
-            "network": {"name": "isolated_net", "driver": "bridge"},
-        },
-        "compose_c_abc.yml.j2": {
-            "image": "busybox",
-            "container_name": "c_abc_container",
-            "abc_mode": "enabled",
-            "extra_env": {"FOO": "123", "BAR": "456"},
-        },
-        "defaults": {"image": "development"},
-    }

@@ -7,24 +7,10 @@ import sys
 import click
 from pathlib import Path
 from typing import Dict, List, Tuple, Any
-import logging
 
 from ..cli.click_logger import ClickLogger, verbose_option, quiet_option
 from ..core.manager import YambleManager
 from ..core.templates import create_sample_config, create_sample_templates
-
-
-logger = logging.getLogger(__name__)
-
-
-def setup_logging(verbose: bool = False) -> None:
-    """Setup logging configuration"""
-    level = logging.DEBUG if verbose else logging.WARN
-    logging.basicConfig(
-        level=level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
-    logger = logging.getLogger(__name__)
-    logger.info("Logging is set to level: %s", logging.getLevelName(level))
 
 
 def check_first_run():
@@ -48,7 +34,6 @@ def check_first_run():
                 f.write("completion_installed")
 
             if result == "reload_shell":
-                logger.debug("Completion installation successful, reloading shell")
                 reload_shell()
 
             if result == "manual":
@@ -96,7 +81,6 @@ def cli(
     ctx, templates_dir: Path, config_file: Path, verbose: bool, quiet: bool
 ) -> None:
     """Compose Template Manager CLI"""
-    setup_logging()
     check_first_run()
 
     # Store common options in context
@@ -129,12 +113,12 @@ def install_completion():
 def list_templates(ctx) -> None:
     """List all available templates organized by category"""
     manager: YambleManager = ctx.obj["manager"]
-    templates = manager.get_all_templates()
+    templates = manager.get_category_templates()
     click_logger: ClickLogger = ctx.obj["click_logger"]
 
     all_templates = {}
     for category, category_templates in templates.items():
-        display_name = manager.categories.get(category, category)
+        display_name = manager.get_category_display_name(category)
         all_templates[display_name] = {}
         if category_templates:
             for template_name in category_templates:
@@ -154,16 +138,16 @@ def interactive(ctx, output: str) -> None:
     click_logger: ClickLogger = ctx.obj["click_logger"]
 
     try:
-        templates = interactive_template_selection(manager)
+        templates_list = interactive_template_selection(manager)
 
         # Generate compose file
-        if not templates:
+        if not templates_list:
             click_logger.error("No templates selected!")
             sys.exit(1)
 
-        templates_list = []
-        for value in templates.values():
-            templates_list.extend(value)
+        # templates_list = []
+        # for value in templates.values():
+        #     templates_list.extend(value)
 
         parse_variables = get_template_variables_interactive(manager, templates_list)
 
@@ -176,7 +160,7 @@ def interactive(ctx, output: str) -> None:
         if not validation_result.success:
             click_logger.log_validation_errors(
                 validation_result,
-                templates=manager.get_templates_simple(),
+                templates=manager.get_all_templates(),
                 show_available=True,
             )
             sys.exit(1)
@@ -190,28 +174,23 @@ def interactive(ctx, output: str) -> None:
         # Log result
         click_logger.log_generation_result(result)
 
-        selected_templates = {
-            "defaults": {
-                "display_name": "Defaults",
-                "templates": templates_list
-            }
-        }
-
         if result.success:
             if click.confirm("Save this configuration for future use?"):
                 save_name = click.prompt("Configuration name")
-                manager.save_configuration(save_name, selected_templates, parse_variables)
-                click.echo(click.style(f"✓ Saved configuration: {save_name}", fg="green"))
+                manager.save_configuration(save_name, templates_list, parse_variables)
+                click.echo(
+                    click.style(f"✓ Saved configuration: {save_name}", fg="green")
+                )
             sys.exit(0)
         else:
             click.echo(click.style("✗ Failed to generate compose file!", fg="red"))
             sys.exit(1)
 
-    except KeyboardInterrupt:
-        click_logger.warning("Generation cancelled by user")
-        sys.exit(130)
     except Exception as e:
-        click_logger.error(f"Unexpected error: {str(e)}")
+        if type(e).__name__ == "Abort":
+            click_logger.error("Cancelled by the user")
+        else:
+            click_logger.error(f"Unexpected error: {e}")
         sys.exit(1)
 
 
@@ -238,8 +217,6 @@ def interactive(ctx, output: str) -> None:
     default="overwrite",
     help="Strategy for handling conflicts",
 )
-# @verbose_option()
-# @quiet_option()
 @click.pass_context
 def generate(
     ctx,
@@ -247,14 +224,11 @@ def generate(
     output: str,
     variables: Tuple[str],
     merge_strategy: str,
-    # verbose: bool,
-    # quiet: bool,
 ) -> None:
     """Generate compose file from specified templates"""
     # Initialize the click logger
     manager: YambleManager = ctx.obj["manager"]
     click_logger: ClickLogger = ctx.obj["click_logger"]
-    # templates_dict = manager.get_all_templates()
 
     try:
         success, parsed_variables = parse_variables(list(variables))
@@ -274,7 +248,7 @@ def generate(
         if not validation_result.success:
             click_logger.log_validation_errors(
                 validation_result,
-                templates=manager.get_templates_simple(),
+                templates=manager.get_all_templates(),
                 show_available=True,
             )
             sys.exit(1)
@@ -294,11 +268,11 @@ def generate(
 
         sys.exit(0 if result.success else 1)
 
-    except KeyboardInterrupt:
-        click_logger.warning("Generation cancelled by user")
-        sys.exit(130)
     except Exception as e:
-        click_logger.error(f"Unexpected error: {str(e)}")
+        if type(e).__name__ == "Abort":
+            click_logger.error("Cancelled by the user")
+        else:
+            click_logger.error(f"Unexpected error: {e}")
         sys.exit(1)
 
 
@@ -345,24 +319,19 @@ def use_config(ctx, config_name: str, output: str, merge_strategy: str) -> None:
             click_logger.error("Configuration has no templates selected")
             sys.exit(1)
 
-        templates = []
-        for category_config in selected_templates.values():
-            if "templates" in category_config:
-                templates.extend(category_config["templates"])
-
         # Start generation
-        click_logger.log_generation_start(list(templates), parsed_variables, output)
+        click_logger.log_generation_start(list(selected_templates), parsed_variables, output)
 
         # Validate request
         click_logger.debug("Validating templates and variables")
         validation_result = manager.validate_templates(
-            templates=list(templates), parsed_variables=parsed_variables
+            templates=list(selected_templates), parsed_variables=parsed_variables
         )
 
         if not validation_result.success:
             click_logger.log_validation_errors(
                 validation_result,
-                templates=manager.get_templates_simple(),
+                templates=manager.get_all_templates(),
                 show_available=True,
             )
             sys.exit(1)
@@ -374,7 +343,7 @@ def use_config(ctx, config_name: str, output: str, merge_strategy: str) -> None:
         # Generate
         click_logger.debug("Generating compose file...")
         result = manager.generate_compose_file(
-            templates, output, parsed_variables, merge_strategy
+            selected_templates, output, parsed_variables, merge_strategy
         )
 
         # Log result
@@ -382,11 +351,11 @@ def use_config(ctx, config_name: str, output: str, merge_strategy: str) -> None:
 
         sys.exit(0 if result.success else 1)
 
-    except KeyboardInterrupt:
-        click_logger.warning("Generation cancelled by user")
-        sys.exit(130)
     except Exception as e:
-        click_logger.error(f"Unexpected error: {str(e)}")
+        if type(e).__name__ == "Abort":
+            click_logger.error("Cancelled by the user")
+        else:
+            click_logger.error(f"Unexpected error: {e}")
         sys.exit(1)
 
 
@@ -501,15 +470,13 @@ def validate(ctx, templates: List[str], variables: Tuple[str]) -> None:
 
     except Exception as e:
         click_logger.error(f"Validation failed: {str(e)}")
-        logger.debug(f"Error: Unable to validate templates {e}")
         sys.exit(1)
 
 
-def interactive_template_selection(manager: YambleManager) -> Dict[str, List[str]]:
+def interactive_template_selection(manager: YambleManager) -> List[str]:
     """Interactive template selection interface"""
-    templates = manager.get_all_templates()
-    selected = {}
-
+    templates = manager.get_category_templates()
+    selected = set()
     click.echo("\n" + "=" * 60)
     click.echo(click.style("Interactive Template Selection", bold=True, fg="blue"))
     click.echo("=" * 60)
@@ -518,7 +485,7 @@ def interactive_template_selection(manager: YambleManager) -> Dict[str, List[str
         if not category_templates:
             continue
 
-        display_name = manager.categories.get(category, category)
+        display_name = manager.get_category_display_name(category)
         click.echo(f"\n{click.style(display_name, bold=True, fg='green')}:")
 
         for i, template in enumerate(category_templates, 1):
@@ -547,7 +514,7 @@ def interactive_template_selection(manager: YambleManager) -> Dict[str, List[str
                         if 0 <= i < len(category_templates)
                     ]
                     if category_selected:
-                        selected[category] = category_selected
+                        selected.update(category_selected)
                         click.echo(
                             f"Selected: {click.style(', '.join(category_selected), fg='green')}"
                         )
@@ -557,9 +524,12 @@ def interactive_template_selection(manager: YambleManager) -> Dict[str, List[str
                     click.style("Invalid selection. Please try again.", fg="red")
                 )
 
-    return selected
+    return list(selected)
 
-def get_template_variables_interactive(manager: YambleManager, templates: List[str]) -> Dict[str, Dict[str, Any]]:
+
+def get_template_variables_interactive(
+    manager: YambleManager, templates: List[str]
+) -> Dict[str, Dict[str, Any]]:
     """Get template variables through interactive prompts until they are all valid."""
     new_variables = {}
 
@@ -586,13 +556,13 @@ def get_template_variables_interactive(manager: YambleManager, templates: List[s
 
         # Keep asking until all required keys are filled and valid
         while missing_keys:
-            click.echo(click.style(
-                f"\nEnter values for: {', '.join(sorted(missing_keys))} or change any default values", fg="yellow"
-            ))
-            user_input = click.prompt(
-                "Format: key=value, key=value",
-                type=str
+            click.echo(
+                click.style(
+                    f"\nEnter values for: {', '.join(sorted(missing_keys))} or change any default values",
+                    fg="yellow",
+                )
             )
+            user_input = click.prompt("Format: key=value, key=value", type=str)
 
             invalid_keys = set()
             for pair in user_input.split(","):
@@ -650,15 +620,11 @@ def main() -> None:
     """Main entry point for CLI"""
     try:
         cli()
-    except KeyboardInterrupt:
-        click.echo("\nOperation cancelled by user")
-        sys.exit(1)
     except Exception as e:
-        logger.error(f"Unexpected error: {e}")
-        if logger.isEnabledFor(logging.DEBUG):
-            import traceback
-
-            traceback.print_exc()
+        if type(e).__name__ == "Abort":
+            click.echo(click.style("Cancelled by the user", fg='red', bold=True))
+        else:
+            click.echo(click.style(f"Unexpected error: {e}", fg='red', bold=True))
         sys.exit(1)
 
 

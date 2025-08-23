@@ -72,7 +72,7 @@ Thumbs.db
 
 # Project specific
 dcm_configurations.yml
-sample_configuration.yml
+sample_configurations.yml
 *compose.yml
 templates/*
 *.log
