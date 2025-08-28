@@ -538,8 +538,6 @@ def run_docker_compose(click_logger: ClickLogger, compose_file: str, daemon: boo
     if daemon:
         cmd.append("-d")
 
-    print(cmd)
-
     try:
         click_logger.info(f"Running the following command: {' '.join(cmd)}")
         subprocess.run(cmd, check=True)
