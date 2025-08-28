@@ -5,8 +5,11 @@ CLI interface for Compose Manager
 import os
 import sys
 import click
+import subprocess
 from pathlib import Path
 from typing import Dict, List, Tuple, Any
+
+from yamble.core.compose_generator import GenerationResult
 
 from ..cli.click_logger import ClickLogger, verbose_option, quiet_option
 from ..core.manager import YambleManager
@@ -59,7 +62,6 @@ def check_first_run():
 
 
 @click.group(invoke_without_command=True)
-# @click.option("--verbose", "-v", is_flag=True, help="Enable verbose logging")
 @click.option(
     "--templates-dir",
     "-t",
@@ -130,6 +132,53 @@ def list_templates(ctx) -> None:
 
 
 @cli.command()
+@click.argument("config_name")
+@click.option("--output", "-o", default="compose.yml", help="Output file path")
+@click.option(
+    "--var",
+    "-V",
+    "variables",
+    multiple=True,
+    help="Template variables in key=value format",
+)
+@click.option(
+    "--merge-strategy",
+    type=click.Choice(["overwrite", "skip", "merge_deep", "error"]),
+    default="overwrite",
+    help="Strategy for handling conflicts",
+)
+@click.option("-d", "daemon", is_flag=True, help="Run in daemon mode")
+@click.pass_context
+def launch(
+    ctx,
+    config_name: str,
+    output: str,
+    variables: Tuple[str],
+    merge_strategy: str,
+    daemon: bool,
+) -> None:
+    """Generate and then launch docker using compose"""
+    manager: YambleManager = ctx.obj["manager"]
+    click_logger: ClickLogger = ctx.obj["click_logger"]
+
+    try:
+        result: GenerationResult = generate_compose(
+            manager, click_logger, config_name, output, merge_strategy
+        )
+        if result.success:
+            run_docker_compose(click_logger, output, daemon)
+
+        sys.exit(0 if result.success else 1)
+
+    except Exception as e:
+        if type(e).__name__ == "Abort":
+            click_logger.error("Cancelled by the user")
+        else:
+            click_logger.error(f"Unexpected error: {e}")
+        sys.exit(1)
+
+
+@cli.command()
 @click.option("--output", "-o", default="compose.yml", help="Output file path")
 @click.pass_context
 def interactive(ctx, output: str) -> None:
@@ -144,10 +193,6 @@ def interactive(ctx, output: str) -> None:
         if not templates_list:
             click_logger.error("No templates selected!")
             sys.exit(1)
-
-        # templates_list = []
-        # for value in templates.values():
-        #     templates_list.extend(value)
 
         parse_variables = get_template_variables_interactive(manager, templates_list)
 
@@ -307,50 +352,11 @@ def use_config(ctx, config_name: str, output: str, merge_strategy: str) -> None:
     click_logger: ClickLogger = ctx.obj["click_logger"]
 
     try:
-        config = manager.load_configuration(config_name)
-        if not config:
-            click_logger.error(f"Configuration '{config_name}' not found")
-            sys.exit(1)
-
-        selected_templates = config.get("selected_templates", {})
-        parsed_variables = config.get("variables", {})
-
-        if not selected_templates:
-            click_logger.error("Configuration has no templates selected")
-            sys.exit(1)
-
-        # Start generation
-        click_logger.log_generation_start(list(selected_templates), parsed_variables, output)
-
-        # Validate request
-        click_logger.debug("Validating templates and variables")
-        validation_result = manager.validate_templates(
-            templates=list(selected_templates), parsed_variables=parsed_variables
+        result: GenerationResult = generate_compose(
+            manager, click_logger, config_name, output, merge_strategy
         )
-
-        if not validation_result.success:
-            click_logger.log_validation_errors(
-                validation_result,
-                templates=manager.get_all_templates(),
-                show_available=True,
-            )
-            sys.exit(1)
-
-        # Validation success message
-        if validation_result.success:
-            click_logger.success("All templates valid!")
-
-        # Generate
-        click_logger.debug("Generating compose file...")
-        result = manager.generate_compose_file(
-            selected_templates, output, parsed_variables, merge_strategy
-        )
-
-        # Log result
-        click_logger.log_generation_result(result)
 
         sys.exit(0 if result.success else 1)
-
     except Exception as e:
         if type(e).__name__ == "Abort":
             click_logger.error("Cancelled by the user")
@@ -470,6 +476,77 @@ def validate(ctx, templates: List[str], variables: Tuple[str]) -> None:
 
     except Exception as e:
         click_logger.error(f"Validation failed: {str(e)}")
+        sys.exit(1)
+
+
+def generate_compose(
+    manager: YambleManager,
+    click_logger: ClickLogger,
+    config_name: str,
+    output: str,
+    merge_strategy: str,
+) -> GenerationResult:
+    config = manager.load_configuration(config_name)
+    if not config:
+        click_logger.error(f"Configuration '{config_name}' not found")
+        sys.exit(1)
+
+    selected_templates = config.get("selected_templates", {})
+    parsed_variables = config.get("variables", {})
+
+    if not selected_templates:
+        click_logger.error("Configuration has no templates selected")
+        sys.exit(1)
+
+    # Start generation
+    click_logger.log_generation_start(
+        list(selected_templates), parsed_variables, output
+    )
+
+    # Validate request
+    click_logger.debug("Validating templates and variables")
+    validation_result = manager.validate_templates(
+        templates=list(selected_templates), parsed_variables=parsed_variables
+    )
+
+    if not validation_result.success:
+        click_logger.log_validation_errors(
+            validation_result,
+            templates=manager.get_all_templates(),
+            show_available=True,
+        )
+        sys.exit(1)
+
+    # Validation success message
+    if validation_result.success:
+        click_logger.success("All templates valid!")
+
+    # Generate
+    click_logger.debug("Generating compose file...")
+    result = manager.generate_compose_file(
+        selected_templates, output, parsed_variables, merge_strategy
+    )
+
+    # Log result
+    click_logger.log_generation_result(result)
+
+    return result
+
+
+def run_docker_compose(click_logger: ClickLogger, compose_file: str, daemon: bool):
+    cmd = ["docker", "compose", "-f", compose_file, "up"]
+    if daemon:
+        cmd.append("-d")
+
+    try:
+        click_logger.info(f"Running the following command: {' '.join(cmd)}")
+        subprocess.run(cmd, check=True)
+
+    except subprocess.CalledProcessError as e:
+        click_logger.error(f"Docker compose failed: {e}")
+        sys.exit(e.returncode)
+    except FileNotFoundError:
+        click_logger.error("Docker is not installed or not in PATH")
         sys.exit(1)
 
 
@@ -622,9 +699,9 @@ def main() -> None:
         cli()
     except Exception as e:
         if type(e).__name__ == "Abort":
-            click.echo(click.style("Cancelled by the user", fg='red', bold=True))
+            click.echo(click.style("Cancelled by the user", fg="red", bold=True))
         else:
-            click.echo(click.style(f"Unexpected error: {e}", fg='red', bold=True))
+            click.echo(click.style(f"Unexpected error: {e}", fg="red", bold=True))
         sys.exit(1)
 
 
