@@ -54,6 +54,11 @@ configurations:
         restart: "always"
         docker_volume_dir: "your/docker/volumes"
         domain: "example.com"
+      profiles:
+        number: 3
+        variables:
+          tag: [local, dev, prod]
+          cf_dns_api_token: [1234, 5678, 3456]
 
   demo_2:
     selected_templates: &demo2_selected_templates

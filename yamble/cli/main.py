@@ -162,8 +162,28 @@ def launch(
     click_logger: ClickLogger = ctx.obj["click_logger"]
 
     try:
+        success, parsed_variables = parse_terminal_variables(list(variables))
+        if not success:
+            click_logger.error("Unable to pass terminal variables!")
+            sys.exit(1)
+
+        config = manager.load_configuration(config_name)
+        if not config:
+            click_logger.error(f"Configuration '{config_name}' not found")
+            sys.exit(1)
+
+        templates = config.get("selected_templates", {})
+        variables = {**config.get("variables", {}), **parsed_variables}
+        profiles = config.get("profiles", {})
+
         result: GenerationResult = generate_compose(
-            manager, click_logger, config_name, output, merge_strategy
+            manager,
+            click_logger,
+            templates,
+            output,
+            merge_strategy,
+            variables,
+            profiles,
         )
         if result.success:
             run_docker_compose(click_logger, output, daemon)
@@ -171,6 +191,7 @@ def launch(
         sys.exit(0 if result.success else 1)
 
     except Exception as e:
+        click.echo("\n")
         if type(e).__name__ == "Abort":
             click_logger.error("Cancelled by the user")
         else:
@@ -180,49 +201,40 @@ def launch(
 
 @cli.command()
 @click.option("--output", "-o", default="compose.yml", help="Output file path")
+@click.option(
+    "--merge-strategy",
+    type=click.Choice(["overwrite", "skip", "merge_deep", "error"]),
+    default="overwrite",
+    help="Strategy for handling conflicts",
+)
 @click.pass_context
-def interactive(ctx, output: str) -> None:
+def interactive(
+    ctx,
+    output: str,
+    merge_strategy: str,
+) -> None:
     """Interactive template selection and compose file generation"""
     manager: YambleManager = ctx.obj["manager"]
     click_logger: ClickLogger = ctx.obj["click_logger"]
 
     try:
-        templates_list = interactive_template_selection(manager)
+        templates = interactive_template_selection(manager)
 
         # Generate compose file
-        if not templates_list:
+        if not templates:
             click_logger.error("No templates selected!")
             sys.exit(1)
 
-        parse_variables = get_template_variables_interactive(manager, templates_list)
+        parsed_variables = get_template_variables_interactive(manager, templates)
 
-        # Validate request
-        click_logger.debug("Validating templates and variables")
-        validation_result = manager.validate_templates(
-            templates=templates_list, parsed_variables=parse_variables
+        result: GenerationResult = generate_compose(
+            manager, click_logger, templates, output, merge_strategy, parsed_variables
         )
-
-        if not validation_result.success:
-            click_logger.log_validation_errors(
-                validation_result,
-                templates=manager.get_all_templates(),
-                show_available=True,
-            )
-            sys.exit(1)
-
-        # Validation success message
-        if validation_result.success:
-            click_logger.success("All templates valid!")
-
-        result = manager.generate_compose_file(templates_list, output, parse_variables)
-
-        # Log result
-        click_logger.log_generation_result(result)
 
         if result.success:
             if click.confirm("Save this configuration for future use?"):
                 save_name = click.prompt("Configuration name")
-                manager.save_configuration(save_name, templates_list, parse_variables)
+                manager.save_configuration(save_name, templates, parsed_variables)
                 click.echo(
                     click.style(f"✓ Saved configuration: {save_name}", fg="green")
                 )
@@ -232,6 +244,7 @@ def interactive(ctx, output: str) -> None:
             sys.exit(1)
 
     except Exception as e:
+        click.echo("\n")
         if type(e).__name__ == "Abort":
             click_logger.error("Cancelled by the user")
         else:
@@ -276,44 +289,18 @@ def generate(
     click_logger: ClickLogger = ctx.obj["click_logger"]
 
     try:
-        success, parsed_variables = parse_variables(list(variables))
+        success, parsed_variables = parse_terminal_variables(list(variables))
         if not success:
             click_logger.error("Unable to pass variables!")
             sys.exit(1)
 
-        # Start generation
-        click_logger.log_generation_start(list(templates), parsed_variables, output)
-
-        # Validate request
-        click_logger.debug("Validating templates and variables")
-        validation_result = manager.validate_templates(
-            templates=list(templates), parsed_variables=parsed_variables
+        result: GenerationResult = generate_compose(
+            manager, click_logger, templates, output, merge_strategy, parsed_variables
         )
-
-        if not validation_result.success:
-            click_logger.log_validation_errors(
-                validation_result,
-                templates=manager.get_all_templates(),
-                show_available=True,
-            )
-            sys.exit(1)
-
-        # Validation success message
-        if validation_result.success:
-            click_logger.success("All templates valid!")
-
-        # Generate
-        click_logger.debug("Generating compose file...")
-        result = manager.generate_compose_file(
-            templates, output, parsed_variables, merge_strategy
-        )
-
-        # Log result
-        click_logger.log_generation_result(result)
 
         sys.exit(0 if result.success else 1)
-
     except Exception as e:
+        click.echo("\n")
         if type(e).__name__ == "Abort":
             click_logger.error("Cancelled by the user")
         else:
@@ -340,24 +327,54 @@ def list_configs(ctx) -> None:
 @click.argument("config_name")
 @click.option("--output", "-o", default="compose.yml", help="Output file path")
 @click.option(
+    "--var",
+    "-V",
+    "variables",
+    multiple=True,
+    help="Template variables in key=value format",
+)
+@click.option(
     "--merge-strategy",
     type=click.Choice(["overwrite", "skip", "merge_deep", "error"]),
     default="overwrite",
     help="Strategy for handling conflicts",
 )
 @click.pass_context
-def use_config(ctx, config_name: str, output: str, merge_strategy: str) -> None:
+def use_config(
+    ctx, config_name: str, output: str, variables: Tuple[str], merge_strategy: str
+) -> None:
     """Generate compose file using a saved configuration"""
     manager: YambleManager = ctx.obj["manager"]
     click_logger: ClickLogger = ctx.obj["click_logger"]
 
     try:
+        success, parsed_variables = parse_terminal_variables(list(variables))
+        if not success:
+            click_logger.error("Unable to pass terminal variables!")
+            sys.exit(1)
+
+        config = manager.load_configuration(config_name)
+        if not config:
+            click_logger.error(f"Configuration '{config_name}' not found")
+            sys.exit(1)
+
+        templates = config.get("selected_templates", {})
+        variables = {**config.get("variables", {}), **parsed_variables}
+        profiles = config.get("profiles", {})
+
         result: GenerationResult = generate_compose(
-            manager, click_logger, config_name, output, merge_strategy
+            manager,
+            click_logger,
+            templates,
+            output,
+            merge_strategy,
+            variables,
+            profiles,
         )
 
         sys.exit(0 if result.success else 1)
     except Exception as e:
+        click.echo("\n")
         if type(e).__name__ == "Abort":
             click_logger.error("Cancelled by the user")
         else:
@@ -455,7 +472,7 @@ def validate(ctx, templates: List[str], variables: Tuple[str]) -> None:
     try:
         click_logger.info(f"Validating {len(templates)} templates", "🔍")
 
-        success, parsed_variables = parse_variables(list(variables))
+        success, parsed_variables = parse_terminal_variables(list(variables))
         if not success:
             click_logger.error("Unable to pass variables!")
             sys.exit(1)
@@ -468,7 +485,7 @@ def validate(ctx, templates: List[str], variables: Tuple[str]) -> None:
         # Log results
         if validation_result.success:
             click_logger.success(f"All {len(templates)} templates are valid!")
-            click_logger.log_parsed_variables(validation_result.parsed_variables)
+            click_logger._log_variables(validation_result.parsed_variables)
         else:
             click_logger.log_validation_errors(validation_result)
 
@@ -482,31 +499,26 @@ def validate(ctx, templates: List[str], variables: Tuple[str]) -> None:
 def generate_compose(
     manager: YambleManager,
     click_logger: ClickLogger,
-    config_name: str,
+    templates: List[str],
     output: str,
     merge_strategy: str,
+    variables={},
+    profiles={},
 ) -> GenerationResult:
-    config = manager.load_configuration(config_name)
-    if not config:
-        click_logger.error(f"Configuration '{config_name}' not found")
-        sys.exit(1)
 
-    selected_templates = config.get("selected_templates", {})
-    parsed_variables = config.get("variables", {})
-
-    if not selected_templates:
+    if not templates:
         click_logger.error("Configuration has no templates selected")
         sys.exit(1)
 
     # Start generation
-    click_logger.log_generation_start(
-        list(selected_templates), parsed_variables, output
-    )
+    click_logger.log_generation_start(list(templates), variables, profiles, output)
 
     # Validate request
     click_logger.debug("Validating templates and variables")
     validation_result = manager.validate_templates(
-        templates=list(selected_templates), parsed_variables=parsed_variables
+        templates=list(templates),
+        parsed_variables=variables,
+        profiles=profiles,
     )
 
     if not validation_result.success:
@@ -524,7 +536,10 @@ def generate_compose(
     # Generate
     click_logger.debug("Generating compose file...")
     result = manager.generate_compose_file(
-        selected_templates, output, parsed_variables, merge_strategy
+        validation_result.templates,
+        output,
+        validation_result.parsed_variables,
+        merge_strategy,
     )
 
     # Log result
@@ -620,13 +635,13 @@ def get_template_variables_interactive(
         allowed_keys = required_keys.union(variables["defaults"].keys())
 
         click.echo(click.style(f"Template: {template}", bold=True))
-        click.echo(click.style("   Required:", fg="blue"))
+        click.echo(click.style("  Required:", fg="blue"))
         for value in variables["required"]:
-            click.echo(f"      {value}")
+            click.echo(f"    {value}")
 
-        click.echo(click.style("   Defaults:", fg="blue"))
+        click.echo(click.style("  Defaults:", fg="blue"))
         for key, value in variables["defaults"].items():
-            click.echo(f"      {key}: {value}")
+            click.echo(f"    {key}: {value}")
 
         kv_pairs = {}
         missing_keys = required_keys.copy()
@@ -673,9 +688,9 @@ def get_template_variables_interactive(
     return new_variables
 
 
-def parse_variables(variables: List[str]) -> Tuple[bool, Dict[str, Any]]:
+def parse_terminal_variables(variables: List[str]) -> Tuple[bool, Dict[str, Any]]:
     """Parse variable strings into dictionary"""
-    parsed_vars = {"defaults": {}}
+    parsed_vars = {}
 
     result = True
     for var in variables:
@@ -684,11 +699,14 @@ def parse_variables(variables: List[str]) -> Tuple[bool, Dict[str, Any]]:
             result = False
             continue
 
+        if "terminal" not in parsed_vars:
+            parsed_vars["terminal"] = {}
+
         key, value = var.split("=", 1)
         if key == "ports":
-            parsed_vars["defaults"][key] = value.split(",")
+            parsed_vars["terminal"][key] = value.split(",")
         else:
-            parsed_vars["defaults"][key] = value
+            parsed_vars["terminal"][key] = value
 
     return (result, parsed_vars)
 

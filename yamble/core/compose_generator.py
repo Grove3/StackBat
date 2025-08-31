@@ -94,7 +94,7 @@ class ComposeGenerator:
         templates: List[str],
         templates_dir: Path,
         output_file: str = "compose.yml",
-        variables: Dict[str, Dict[str, Any]] = {},
+        variables: Dict[int, Dict[str, Dict[str, Any]]] = {},
         merge_strategy: str = "overwrite",
     ) -> GenerationResult:
         """
@@ -123,54 +123,57 @@ class ComposeGenerator:
         try:
             logger.info(f"Generating compose file from {len(templates)} templates")
 
-            # Initialize compose structure
-            compose = ComposeStructure()
+            for i, value in enumerate(variables.values()):
+                new_output_file = output_file
+                if len(variables.values()) > 1:
+                    array = new_output_file.split(".")
+                    new_output_file = f"{array[0]}_{i + 1}.{array[1]}"
 
-            # Reset tracking sets
-            self._processed_services.clear()
-            self._processed_networks.clear()
-            self._processed_volumes.clear()
+                # Initialize compose structure
+                compose = ComposeStructure()
 
-            # Process each template
-            for template_file in templates:
-                template_vars = {
-                    **variables.get(template_file, {}),
-                    **variables.get("defaults", {}),
-                }
-                template_result = self._process_template(
-                    template_file, templates_dir, template_vars, compose
-                )
+                # Reset tracking sets
+                self._processed_services.clear()
+                self._processed_networks.clear()
+                self._processed_volumes.clear()
 
-                if template_result.success:
-                    result.processed_templates.append(template_file)
+                # Process each template
+                for template_file in templates:
+                    template_vars = value.get(template_file, {})
+                    template_result = self._process_template(
+                        template_file, templates_dir, template_vars, compose
+                    )
+
+                    if template_result.success:
+                        result.processed_templates.append(template_file)
+                    else:
+                        result.skipped_templates.append(template_file)
+                        result.errors.extend(template_result.errors)
+                        result.warnings.extend(template_result.warnings)
+
+                # Validate final structure if enabled
+                if self.validate_services:
+                    validation_errors = self._validate_compose_structure(compose)
+                    result.errors.extend(validation_errors)
+
+                # Generate output if we have any services
+                if not compose.services:
+                    result.errors.append("No services found in processed templates")
+                    return result
+
+                # Write the compose file
+                success = self._write_compose_file(compose, new_output_file)
+                if success:
+                    result.success = True
+                    result.output_file = Path(new_output_file)
+                    result.services_count = len(compose.services)
+                    result.networks_count = len(compose.networks)
+                    result.volumes_count = len(compose.volumes)
+                    logger.info(
+                        f"Successfully generated {new_output_file} with {result.services_count} services"
+                    )
                 else:
-                    result.skipped_templates.append(template_file)
-                    result.errors.extend(template_result.errors)
-                    result.warnings.extend(template_result.warnings)
-
-            # Validate final structure if enabled
-            if self.validate_services:
-                validation_errors = self._validate_compose_structure(compose)
-                result.errors.extend(validation_errors)
-
-            # Generate output if we have any services
-            if not compose.services:
-                result.errors.append("No services found in processed templates")
-                return result
-
-            # Write the compose file
-            success = self._write_compose_file(compose, output_file)
-            if success:
-                result.success = True
-                result.output_file = Path(output_file)
-                result.services_count = len(compose.services)
-                result.networks_count = len(compose.networks)
-                result.volumes_count = len(compose.volumes)
-                logger.info(
-                    f"Successfully generated {output_file} with {result.services_count} services"
-                )
-            else:
-                result.errors.append("Failed to write compose file")
+                    result.errors.append("Failed to write compose file")
 
         except Exception as e:
             logger.error(f"Unexpected error during compose generation: {e}")
@@ -644,7 +647,7 @@ class ComposeGenerator:
             default_flow_style=False,
             indent=2,
             sort_keys=False,
-            allow_unicode=True
+            allow_unicode=True,
         )
 
         if not self.format_output:
@@ -655,7 +658,7 @@ class ComposeGenerator:
         return yaml_content
 
     def _add_section_and_item_spacing(self, yaml_content: str) -> str:
-        lines = yaml_content.split('\n')
+        lines = yaml_content.split("\n")
         result_lines = []
 
         i = 0
@@ -665,14 +668,14 @@ class ComposeGenerator:
         while i < len(lines):
             line = lines[i]
 
-            if re.match(r'^[a-zA-Z0-9_-]+:', line):
+            if re.match(r"^[a-zA-Z0-9_-]+:", line):
                 if not first_section:
                     line = "\n" + line
                     first_item = True
                 else:
                     first_section = False
 
-            elif re.match(r'^  [a-zA-Z0-9_-]+:', line):
+            elif re.match(r"^  [a-zA-Z0-9_-]+:", line):
                 if not first_item:
                     line = "\n" + line
                 else:
@@ -682,8 +685,7 @@ class ComposeGenerator:
 
             i += 1
 
-
-        return '\n'.join(result_lines)
+        return "\n".join(result_lines)
 
     def _add_header(self, yaml_content: str) -> str:
         header = f"""# -------------------------------------------------------------------

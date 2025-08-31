@@ -7,9 +7,9 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Any, Optional, TypedDict
 from jinja2 import Environment, FileSystemLoader, meta, nodes
-from dataclasses import dataclass, field
 
 from ..core.compose_generator import ComposeGenerator, GenerationResult
+from ..core.validator import Validator, ValidationResult
 
 
 logger = logging.getLogger(__name__)
@@ -18,27 +18,22 @@ logger = logging.getLogger(__name__)
 class ConfigVariables(TypedDict):
     selected_templates: List[str]
     variables: Dict[str, Dict[str, Any]]
+
+
 ConfigType = Dict[str, ConfigVariables]
+
 
 class Category(TypedDict):
     display_name: str
     templates: list[str]
+
+
 CategoryType = dict[str, Category]
+
 
 class RootType(TypedDict):
     categories: CategoryType
     configurations: ConfigType
-
-
-@dataclass
-class ValidationResult:
-    """Result of template and variable validation"""
-
-    success: bool = False
-    missing_templates: List[str] = field(default_factory=list)
-    variable_errors: List[str] = field(default_factory=list)
-    template_errors: List[str] = field(default_factory=list)
-    parsed_variables: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -81,11 +76,9 @@ class YambleManager:
         self.compose_generator = ComposeGenerator(
             self.jinja_env,
         )
+        self.validator = Validator(self.jinja_env, self.templates_dir)
 
-        self.configurations: RootType = {
-            "categories": {},
-            "configurations": {}
-        }
+        self.configurations: RootType = {"categories": {}, "configurations": {}}
         self.load_configurations()
 
     def load_configurations(self) -> None:
@@ -153,11 +146,15 @@ class YambleManager:
             for template in value.get("templates", []):
                 if template in available_templates:
                     if key in category_templates:
-                        category_templates[key].append(pop_by_value(available_templates, template))
+                        category_templates[key].append(
+                            pop_by_value(available_templates, template)
+                        )
                     else:
-                        category_templates[key] = [pop_by_value(available_templates, template)]
+                        category_templates[key] = [
+                            pop_by_value(available_templates, template)
+                        ]
 
-        category_templates['others'] = available_templates
+        category_templates["others"] = available_templates
 
         return category_templates
 
@@ -231,38 +228,11 @@ class YambleManager:
             logger.error(f"Error parsing template {template_file}: {e}")
             return []
 
-    def validate_template(
-        self, template_file: str, variables: Dict[str, Any] = {}
-    ) -> tuple[bool, str]:
-        """
-        Validate a template file
-
-        Args:
-            template_file: Name of template file to validate
-            variables: Variables to use for template rendering
-
-        Returns:
-            Tuple of (is_valid, error_message)
-        """
-        try:
-            template_path = self.templates_dir / template_file
-            if not template_path.exists():
-                return False, f"Template file not found: {template_file}"
-
-            # Try to load and render template
-            template = self.jinja_env.get_template(template_file)
-            rendered_content = template.render(**(variables or {}))
-
-            # Try to parse as YAML
-            yaml.safe_load(rendered_content)
-
-            return True, "Template is valid"
-
-        except Exception as e:
-            return False, f"Template validation failed: {str(e)}"
-
     def validate_templates(
-        self, templates: List[str], parsed_variables: Dict[str, Dict[str, Any]]
+        self,
+        templates: List[str],
+        parsed_variables: Dict[str, Dict[str, Any]],
+        profiles={},
     ) -> ValidationResult:
         """
         Validate templates and variables for generation
@@ -274,54 +244,13 @@ class YambleManager:
         Returns:
             ValidationResult with all validation outcomes
         """
-        result = ValidationResult(success=True)
-
-        # Get available templates
-        templates_dict = self.get_category_templates()
-        all_templates = [
-            item for sublist in templates_dict.values() for item in sublist
-        ]
-
-        # Check template availability
-        for template_file in templates:
-            if template_file not in all_templates:
-                result.missing_templates.append(template_file)
-
-        # Validate template content
-        self._validate_template_content(templates, parsed_variables, result)
-
-        # Set overall success
-        result.success = (
-            not result.missing_templates
-            and not result.variable_errors
-            and not result.template_errors
-        )
-
-        return result
-
-    def _validate_template_content(
-        self,
-        templates: List[str],
-        variables: Dict[str, Dict[str, Any]],
-        result: ValidationResult,
-    ) -> None:
-        """Validate template content"""
-        for template_file in templates:
-            template_vars = {
-                **variables.get(template_file, {}),
-                **variables.get("defaults", {}),
-            }
-            is_valid, error_msg = self.validate_template(template_file, template_vars)
-            if not is_valid:
-                result.template_errors.append(
-                    f"Template '{template_file}': {error_msg}"
-                )
+        return self.validator.validate_templates(templates, parsed_variables, profiles)
 
     def generate_compose_file(
         self,
         templates: List[str],
         output_file: str = "compose.yml",
-        variables: Dict[str, Dict[str, Any]] = {},
+        variables: Dict[int, Dict[str, Dict[str, Any]]] = {},
         merge_strategy: str = "overwrite",
     ) -> GenerationResult:
         """
@@ -429,7 +358,9 @@ class YambleManager:
                         if isinstance(default_val_node, nodes.Const):
                             defaults_map[var_name] = default_val_node.value
                         else:
-                            defaults_map[var_name] = f"<dynamic:{type(default_val_node).__name__}>"
+                            defaults_map[var_name] = (
+                                f"<dynamic:{type(default_val_node).__name__}>"
+                            )
             # Recursively walk child nodes
             for field_name in node.fields:
                 child = getattr(node, field_name)
