@@ -26,7 +26,7 @@ categories:
 
 configurations:
   demo:
-    selected_templates: &demo_selected_templates
+    templates: &demo_templates
       - "traefik.yml.j2"
       - "bitwarden.yml.j2"
       - "pia_vpn.yml.j2"
@@ -61,7 +61,7 @@ configurations:
           cf_dns_api_token: [1234, 5678, 3456]
 
   demo_2:
-    selected_templates: &demo2_selected_templates
+    templates: &demo2_templates
       - "plex.yml.j2"
       - "traefik.yml.j2"
       - "sabnzbd.yml.j2"
@@ -91,8 +91,9 @@ configurations:
         domain: "demo2.example.com"
 
   demo_3:
-    selected_templates:
-      [*demo_selected_templates, *demo2_selected_templates]
+    templates:
+      - *demo_templates
+      - *demo2_templates
     variables:
       <<: [*demo_variables, *demo2_variables]
 """

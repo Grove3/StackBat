@@ -73,6 +73,6 @@ Thumbs.db
 # Project specific
 dcm_configurations.yml
 sample_configurations.yml
-*compose.yml
+*compose*.yml
 templates/*
 *.log
