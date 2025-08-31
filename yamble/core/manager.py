@@ -2,6 +2,7 @@
 Core Compose Manager functionality
 """
 
+import os
 import yaml
 import logging
 from pathlib import Path
@@ -59,12 +60,50 @@ class YambleManager:
             templates_dir: Directory containing Jinja2 templates
             config_file: Path to configuration file for saved configurations
         """
-        self.templates_dir = Path(templates_dir or "templates")
-        self.config_file = Path(config_file or "dcm_configurations.yml")
-        self.sample_config_file = Path("sample_configurations.yml")
+        default_templates_dir = Path("templates")
+        default_config_file = Path("dcm_configurations.yml")
 
-        # Ensure templates directory exists
-        self.templates_dir.mkdir(exist_ok=True)
+        yamble_config_dir = Path.home() / ".config" / "yamble"
+
+        templates_override_file = yamble_config_dir / "templates_location"
+        config_override_file = yamble_config_dir / "configuration_location"
+
+        templates_from_file = None
+        config_from_file = None
+
+        if templates_override_file.exists():
+            try:
+                with open(templates_override_file, "r") as f:
+                    path = self._expand_path(f.read())
+                    if path.is_dir():
+                        templates_from_file = path
+                    else:
+                        logger.warning(
+                            f"Templates path in {templates_override_file} is invalid: {path}"
+                        )
+            except Exception as e:
+                logger.error(f"Error reading {templates_override_file}: {e}")
+
+        if config_override_file.exists():
+            try:
+                with open(config_override_file, "r") as f:
+                    path = self._expand_path(f.read())
+                    if path.is_file():
+                        config_from_file = path
+                    else:
+                        logger.warning(
+                            f"Config path in {config_override_file} is invalid: {path}"
+                        )
+            except Exception as e:
+                logger.error(f"Error reading {config_override_file}: {e}")
+
+        self.templates_dir = Path(
+            templates_dir or templates_from_file or default_templates_dir
+        )
+        self.config_file = Path(
+            config_file or config_from_file or default_config_file
+        )
+        self.sample_config_file = Path("sample_configurations.yml")
 
         # Setup Jinja2 environment
         self.jinja_env = Environment(
@@ -153,8 +192,8 @@ class YambleManager:
                         category_templates[key] = [
                             pop_by_value(available_templates, template)
                         ]
-
-        category_templates["others"] = available_templates
+        if available_templates:
+            category_templates["others"] = available_templates
 
         return category_templates
 
@@ -378,3 +417,7 @@ class YambleManager:
 
         final_map = {"defaults": defaults_map, "required": required}
         return final_map
+
+    def _expand_path(self, path_str: str) -> Path:
+        """Expand ~ and environment variables in a path string."""
+        return Path(os.path.expandvars(os.path.expanduser(path_str.strip())))
