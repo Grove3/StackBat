@@ -66,14 +66,12 @@ def check_first_run():
     "--templates-dir",
     "-t",
     type=click.Path(exists=False, file_okay=False, dir_okay=True, path_type=Path),
-    default=Path("templates"),
     help="Directory containing template files",
 )
 @click.option(
     "--config-file",
     "-c",
     type=click.Path(dir_okay=False, path_type=Path),
-    default=Path("dcm_configurations.yml"),
     help="Configuration file for saved configurations",
 )
 @verbose_option()
@@ -92,7 +90,8 @@ def cli(
     ctx.obj["verbose"] = verbose
     ctx.obj["quiet"] = quiet
     ctx.obj["manager"] = YambleManager(
-        templates_dir=str(templates_dir), config_file=str(config_file)
+        templates_dir=str(templates_dir) if templates_dir else None,
+        config_file=str(config_file) if config_file else None,
     )
     ctx.obj["click_logger"] = ClickLogger(verbose, quiet)
 
@@ -427,8 +426,8 @@ def create_samples(ctx, force: bool) -> None:
     """Create sample template files"""
     manager: YambleManager = ctx.obj["manager"]
     click_logger: ClickLogger = ctx.obj["click_logger"]
-    templates_dir = ctx.obj["templates_dir"]
     config_dir = manager.sample_config_file
+    templates_dir = Path("templates")
 
     created_count = create_sample_templates(templates_dir, force)
 
