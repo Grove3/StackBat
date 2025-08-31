@@ -172,7 +172,7 @@ def launch(
             click_logger.error(f"Configuration '{config_name}' not found")
             sys.exit(1)
 
-        templates = config.get("selected_templates", {})
+        templates = config.get("templates", {})
         variables = {**config.get("variables", {}), **parsed_variables}
         profiles = config.get("profiles", {})
 
@@ -358,7 +358,7 @@ def use_config(
             click_logger.error(f"Configuration '{config_name}' not found")
             sys.exit(1)
 
-        templates = config.get("selected_templates", {})
+        templates = config.get("templates", {})
         variables = {**config.get("variables", {}), **parsed_variables}
         profiles = config.get("profiles", {})
 
