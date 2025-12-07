@@ -5,8 +5,8 @@ Click logging utilities for Compose generation results
 import sys
 import click
 from typing import List, Dict, Any
-from ..core.manager import ValidationResult, ConfigType
-from ..core.compose_generator import GenerationResult
+from yamble.core.manager import ValidationResult, ConfigType
+from yamble.core.compose_generator import GenerationResult
 
 
 class ClickLogger:
