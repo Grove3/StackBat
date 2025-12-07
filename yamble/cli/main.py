@@ -9,11 +9,10 @@ import subprocess
 from pathlib import Path
 from typing import Dict, List, Tuple, Any
 
+from yamble.cli.click_logger import ClickLogger, verbose_option, quiet_option
 from yamble.core.compose_generator import GenerationResult
-
-from ..cli.click_logger import ClickLogger, verbose_option, quiet_option
-from ..core.manager import YambleManager
-from ..core.templates import create_sample_config, create_sample_templates
+from yamble.core.manager import YambleManager
+from yamble.core.templates import create_sample_config, create_sample_templates
 
 
 def check_first_run():
@@ -74,11 +73,22 @@ def check_first_run():
     type=click.Path(dir_okay=False, path_type=Path),
     help="Configuration file for saved configurations",
 )
+@click.option(
+    "--allow-shell",
+    is_flag=True,
+    default=False,
+    help="Allow templates to execute shell commands (default: disabled)",
+)
 @verbose_option()
 @quiet_option()
 @click.pass_context
 def cli(
-    ctx, templates_dir: Path, config_file: Path, verbose: bool, quiet: bool
+    ctx,
+    templates_dir: Path,
+    config_file: Path,
+    allow_shell: bool,
+    verbose: bool,
+    quiet: bool,
 ) -> None:
     """Compose Template Manager CLI"""
     check_first_run()
@@ -87,12 +97,16 @@ def cli(
     ctx.ensure_object(dict)
     ctx.obj["templates_dir"] = templates_dir
     ctx.obj["config_file"] = config_file
+    ctx.obj["allow_shell"] = allow_shell
     ctx.obj["verbose"] = verbose
     ctx.obj["quiet"] = quiet
+
     ctx.obj["manager"] = YambleManager(
         templates_dir=str(templates_dir) if templates_dir else None,
         config_file=str(config_file) if config_file else None,
+        allow_shell=allow_shell,
     )
+
     ctx.obj["click_logger"] = ClickLogger(verbose, quiet)
 
     # If no command is specified, show help
@@ -114,7 +128,7 @@ def install_completion():
 def list_templates(ctx) -> None:
     """List all available templates organized by category"""
     manager: YambleManager = ctx.obj["manager"]
-    templates = manager.get_category_templates()
+    templates = manager.category_templates
     click_logger: ClickLogger = ctx.obj["click_logger"]
 
     all_templates = {}
@@ -124,7 +138,7 @@ def list_templates(ctx) -> None:
         if category_templates:
             for template_name in category_templates:
                 all_templates[display_name][template_name] = (
-                    manager.parse_template_services(template_name)
+                    manager.get_template_service_names(template_name)
                 )
 
     click_logger.log_templates(all_templates)
@@ -313,7 +327,7 @@ def list_configs(ctx) -> None:
     """List saved configurations"""
     manager: YambleManager = ctx.obj["manager"]
     click_logger: ClickLogger = ctx.obj["click_logger"]
-    configs = manager.list_configurations()
+    configs = manager.configuration_names
 
     all_configs = {}
     for config_name in configs:
@@ -390,7 +404,7 @@ def delete_config(ctx, config_name: str) -> None:
 
     if not config_name:
         # List available configurations
-        configs = manager.get_configuration_names()
+        configs = manager.configuration_names
         if configs:
             click.echo(click.style("Available configurations:", fg="yellow"))
             for config in configs:
@@ -403,7 +417,7 @@ def delete_config(ctx, config_name: str) -> None:
     if not manager.load_configuration(config_name):
         click.echo(click.style(f"Configuration '{config_name}' not found", fg="red"))
         # Show available configs here too
-        configs = manager.get_configuration_names()
+        configs = manager.configuration_names
         if configs:
             click.echo(click.style("Available configurations:", fg="yellow"))
             for config in configs:
@@ -504,7 +518,6 @@ def generate_compose(
     variables={},
     profiles={},
 ) -> GenerationResult:
-
     if not templates:
         click_logger.error("Configuration has no templates selected")
         sys.exit(1)
@@ -523,14 +536,12 @@ def generate_compose(
     if not validation_result.success:
         click_logger.log_validation_errors(
             validation_result,
-            templates=manager.get_all_templates(),
+            templates=manager.all_templates,
             show_available=True,
         )
         sys.exit(1)
 
-    # Validation success message
-    if validation_result.success:
-        click_logger.success("All templates valid!")
+    click_logger.success("All templates valid!")
 
     # Generate
     click_logger.debug("Generating compose file...")
@@ -566,7 +577,7 @@ def run_docker_compose(click_logger: ClickLogger, compose_file: str, daemon: boo
 
 def interactive_template_selection(manager: YambleManager) -> List[str]:
     """Interactive template selection interface"""
-    templates = manager.get_category_templates()
+    templates = manager.category_templates
     selected = set()
     click.echo("\n" + "=" * 60)
     click.echo(click.style("Interactive Template Selection", bold=True, fg="blue"))
@@ -580,7 +591,7 @@ def interactive_template_selection(manager: YambleManager) -> List[str]:
         click.echo(f"\n{click.style(display_name, bold=True, fg='green')}:")
 
         for i, template in enumerate(category_templates, 1):
-            services = manager.parse_template_services(template)
+            services = manager.get_template_service_names(template)
             click.echo(f"{i:2d}. {click.style(template, fg='cyan')}")
             if services:
                 services_str = ", ".join(services)

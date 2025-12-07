@@ -4,13 +4,15 @@ Core Compose Manager functionality
 
 import os
 import yaml
+import shlex
 import logging
+import subprocess
 from pathlib import Path
 from typing import Dict, List, Any, Optional, TypedDict
 from jinja2 import Environment, FileSystemLoader, meta, nodes
 
-from ..core.compose_generator import ComposeGenerator, GenerationResult
-from ..core.validator import Validator, ValidationResult
+from yamble.core.compose_generator import ComposeGenerator, GenerationResult
+from yamble.core.validator import Validator, ValidationResult
 
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,13 @@ class RootType(TypedDict):
     configurations: ConfigType
 
 
+class ShellExecutionError(Exception):
+    pass
+
+
+ALLOWED_BINARIES = ["id", "whoami"]
+
+
 def setup_logging(verbose: bool = False) -> None:
     """Setup logging configuration"""
     level = logging.DEBUG if verbose else logging.WARN
@@ -51,7 +60,10 @@ class YambleManager:
     """Core class for managing Compose templates"""
 
     def __init__(
-        self, templates_dir: Optional[str] = None, config_file: Optional[str] = None
+        self,
+        templates_dir: Optional[str] = None,
+        config_file: Optional[str] = None,
+        allow_shell=False,
     ):
         """
         Initialize the Compose Manager
@@ -59,12 +71,18 @@ class YambleManager:
         Args:
             templates_dir: Directory containing Jinja2 templates
             config_file: Path to configuration file for saved configurations
+            allow_shell: Allow shell command execution in templates
         """
+        self.allow_shell = allow_shell
+
+        # Initialize empty configurations (will be loaded by set_config_file)
+        self.configurations: RootType = {"categories": {}, "configurations": {}}
+
+        # Determine paths from various sources
         default_templates_dir = Path("templates")
         default_config_file = Path("dcm_configurations.yml")
 
         yamble_config_dir = Path.home() / ".config" / "yamble"
-
         templates_override_file = yamble_config_dir / "templates_location"
         config_override_file = yamble_config_dir / "configuration_location"
 
@@ -97,28 +115,182 @@ class YambleManager:
             except Exception as e:
                 logger.error(f"Error reading {config_override_file}: {e}")
 
-        self.templates_dir = Path(
-            templates_dir or templates_from_file or default_templates_dir
-        )
-        self.config_file = Path(
-            config_file or config_from_file or default_config_file
-        )
+        # Determine final paths
+        final_templates_dir = templates_dir or templates_from_file or default_templates_dir
+        final_config_file = config_file or config_from_file or default_config_file
+
         self.sample_config_file = Path("sample_configurations.yml")
 
-        # Setup Jinja2 environment
-        self.jinja_env = Environment(
-            loader=FileSystemLoader(self.templates_dir),
-            trim_blocks=True,
-            lstrip_blocks=True,
-        )
+        # Use helper methods to initialize everything
+        # Note: We need to set templates_dir first (without validation) so set_config_file works
+        self.templates_dir = Path(final_templates_dir)
+        self._initialize_jinja_env()
 
-        self.compose_generator = ComposeGenerator(
-            self.jinja_env,
-        )
+        # Initialize dependent components
+        self.compose_generator = ComposeGenerator(self.jinja_env)
         self.validator = Validator(self.jinja_env, self.templates_dir)
 
-        self.configurations: RootType = {"categories": {}, "configurations": {}}
+        # Now set config file and load configurations
+        self.config_file = Path(final_config_file)
         self.load_configurations()
+
+    # ==================== Properties ====================
+
+    @property
+    def current_paths(self) -> dict[str, Path]:
+        """
+        Get the current templates directory and config file paths
+
+        Returns:
+            Dictionary with 'templates_dir' and 'config_file' paths
+        """
+        return {
+            "templates_dir": self.templates_dir,
+            "config_file": self.config_file,
+        }
+
+    @property
+    def templates_directory(self) -> Path:
+        """Get the current templates directory"""
+        return self.templates_dir
+
+    @property
+    def configuration_file(self) -> Path:
+        """Get the current configuration file path"""
+        return self.config_file
+
+    @property
+    def all_templates(self) -> list[str]:
+        """Get all available template files"""
+        all_template_files = set(f.name for f in self.templates_dir.glob("*.yml.j2"))
+        all_template_files.update(f.name for f in self.templates_dir.glob("*.yaml.j2"))
+        return list(all_template_files)
+
+    @property
+    def category_templates(self) -> Dict[str, List[str]]:
+        """
+        Get all available templates organized by category
+
+        Returns:
+            Dictionary mapping category names to lists of template files
+        """
+        available_templates = self.all_templates.copy()
+        categories = self.configurations.get("categories", {})
+        category_templates = {}
+
+        def pop_by_value(s: list, value):
+            if value in s:
+                s.remove(value)
+                return value
+            return None
+
+        for key, value in categories.items():
+            for template in value.get("templates", []):
+                if template in available_templates:
+                    if key in category_templates:
+                        category_templates[key].append(
+                            pop_by_value(available_templates, template)
+                        )
+                    else:
+                        category_templates[key] = [
+                            pop_by_value(available_templates, template)
+                        ]
+        if available_templates:
+            category_templates["others"] = available_templates
+
+        return category_templates
+
+    @property
+    def configuration_names(self) -> List[str]:
+        """
+        Get list of saved configuration names
+
+        Returns:
+            List of configuration names
+        """
+        return list(self.configurations["configurations"].keys())
+
+    # ==================== Public Methods ====================
+
+    def set_templates_dir(self, templates_dir: str | Path) -> bool:
+        """
+        Change the templates directory and reload the Jinja environment
+
+        Args:
+            templates_dir: New path to templates directory
+
+        Returns:
+            True if successful, False if directory doesn't exist
+        """
+        new_path = Path(templates_dir)
+
+        if not new_path.exists() or not new_path.is_dir():
+            logger.error(f"Templates directory does not exist: {new_path}")
+            return False
+
+        self.templates_dir = new_path
+
+        # Reinitialize Jinja environment
+        self._initialize_jinja_env()
+
+        # Update dependent components
+        self.compose_generator = ComposeGenerator(self.jinja_env)
+        self.validator = Validator(self.jinja_env, self.templates_dir)
+
+        logger.info(f"Templates directory changed to: {self.templates_dir}")
+        return True
+
+    def set_config_file(self, config_file: str | Path) -> bool:
+        """
+        Change the config file path and reload configurations
+
+        Args:
+            config_file: New path to config file
+
+        Returns:
+            True if successful, False otherwise
+        """
+        new_path = Path(config_file)
+
+        # Config file doesn't need to exist yet (can be created on save)
+        if new_path.exists() and not new_path.is_file():
+            logger.error(f"Config path exists but is not a file: {new_path}")
+            return False
+
+        self.config_file = new_path
+
+        # Reload configurations from new file
+        self.configurations = {"categories": {}, "configurations": {}}
+        self.load_configurations()
+
+        logger.info(f"Config file changed to: {self.config_file}")
+        return True
+
+    def reload_templates_and_config(
+        self,
+        templates_dir: Optional[str | Path] = None,
+        config_file: Optional[str | Path] = None
+    ) -> tuple[bool, bool]:
+        """
+        Change both templates directory and config file, then reload
+
+        Args:
+            templates_dir: New path to templates directory (None to keep current)
+            config_file: New path to config file (None to keep current)
+
+        Returns:
+            Tuple of (templates_success, config_success)
+        """
+        templates_success = True
+        config_success = True
+
+        if templates_dir is not None:
+            templates_success = self.set_templates_dir(templates_dir)
+
+        if config_file is not None:
+            config_success = self.set_config_file(config_file)
+
+        return templates_success, config_success
 
     def load_configurations(self) -> None:
         """Load saved configurations from YAML file"""
@@ -158,51 +330,14 @@ class YambleManager:
             logger.error(f"Error saving configurations: {e}")
 
     def get_category_display_name(self, category):
+        """Get the display name for a category"""
         categories = self.configurations.get("categories", {})
         if category in categories:
             return categories[category]["display_name"]
 
         return category
 
-    def get_category_templates(self) -> Dict[str, List[str]]:
-        """
-        Get all available templates organized by category
-
-        Returns:
-            Dictionary mapping category names to lists of template files
-        """
-        available_templates = self.get_all_templates()
-        categories = self.configurations.get("categories", {})
-        category_templates = {}
-
-        def pop_by_value(s: list, value):
-            if value in s:
-                s.remove(value)
-                return value
-            return None
-
-        for key, value in categories.items():
-            for template in value.get("templates", []):
-                if template in available_templates:
-                    if key in category_templates:
-                        category_templates[key].append(
-                            pop_by_value(available_templates, template)
-                        )
-                    else:
-                        category_templates[key] = [
-                            pop_by_value(available_templates, template)
-                        ]
-        if available_templates:
-            category_templates["others"] = available_templates
-
-        return category_templates
-
-    def get_all_templates(self) -> list[str]:
-        all_template_files = set(f.name for f in self.templates_dir.glob("*.yml.j2"))
-        all_template_files.update(f.name for f in self.templates_dir.glob("*.yaml.j2"))
-        return list(all_template_files)
-
-    def parse_template_services(self, template_file: str) -> List[str]:
+    def get_template_service_names(self, template_file: str) -> List[str]:
         """
         Parse a template file to extract service names
 
@@ -231,7 +366,7 @@ class YambleManager:
                     return list(data["services"].keys())
             except Exception as e:
                 logger.debug(
-                    f"Could not render template {template_file} for parsing: {e}"
+                    f"Could not render template {template_file}, fallback to basic text parsing. Error: {e}"
                 )
 
             # Fallback: basic text parsing
@@ -308,9 +443,6 @@ class YambleManager:
             templates, self.templates_dir, output_file, variables, merge_strategy
         )
 
-    def get_configuration_names(self) -> List[str]:
-        return list(self.configurations["configurations"].keys())
-
     def save_configuration(
         self,
         name: str,
@@ -351,15 +483,6 @@ class YambleManager:
             logger.warning(f"Configuration not found: {name}")
             return None
 
-    def list_configurations(self) -> List[str]:
-        """
-        Get list of saved configuration names
-
-        Returns:
-            List of configuration names
-        """
-        return list(self.configurations["configurations"].keys())
-
     def delete_configuration(self, name: str) -> bool:
         """
         Delete a saved configuration
@@ -380,6 +503,15 @@ class YambleManager:
             return False
 
     def get_jinja_template_vars(self, template_name: str) -> Dict[str, Any]:
+        """
+        Extract variables from a Jinja template
+
+        Args:
+            template_name: Name of the template file
+
+        Returns:
+            Dictionary with 'defaults' and 'required' variable lists
+        """
         # Load template source
         source, _, _ = self.jinja_env.loader.get_source(self.jinja_env, template_name)
 
@@ -418,6 +550,46 @@ class YambleManager:
         final_map = {"defaults": defaults_map, "required": required}
         return final_map
 
+    # ==================== Private Methods ====================
+
+    def _initialize_jinja_env(self) -> None:
+        """Initialize or reinitialize the Jinja2 environment"""
+        self.jinja_env = Environment(
+            loader=FileSystemLoader(self.templates_dir),
+            trim_blocks=True,
+            lstrip_blocks=True,
+        )
+
+        # Inject environment variables as 'env'
+        self.jinja_env.globals["env"] = os.environ
+
+        # Inject getenv() helper
+        self.jinja_env.globals["getenv"] = os.getenv
+
+        # Inject safe shell execution helper
+        self.jinja_env.globals["sh"] = self._safe_sh
+
     def _expand_path(self, path_str: str) -> Path:
         """Expand ~ and environment variables in a path string."""
         return Path(os.path.expandvars(os.path.expanduser(path_str.strip())))
+
+    def _safe_sh(self, cmd):
+        """Run shell commands only if explicitly allowed."""
+        if not self.allow_shell:
+            raise ShellExecutionError(f"Shell execution disabled. Cannot run: {cmd}")
+
+        parts = shlex.split(cmd)
+        if not parts:
+            raise ShellExecutionError("Empty command")
+
+        allowed_list = [*ALLOWED_BINARIES, *self.configurations.get("allowed_binaries", [])]
+
+        binary = parts[0]
+        if binary not in allowed_list:
+            allowed = ", ".join(sorted(allowed_list))
+            raise ShellExecutionError(f"Command '{binary}' not allowed. Allowed: {allowed}")
+
+        try:
+            return subprocess.check_output(parts, text=True).strip()
+        except Exception as exc:
+            raise ShellExecutionError(f"Error running '{cmd}': {exc}") from exc

@@ -3,7 +3,7 @@ Template management utilities
 """
 
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Dict, Optional
 import logging
 
 logger = logging.getLogger(__name__)

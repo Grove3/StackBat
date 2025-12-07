@@ -10,13 +10,12 @@ authors = [
 ]
 description = "A CLI and GUI tool for managing compose templates using Jinja2"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 requires-python = ">=3.9"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
@@ -35,7 +34,7 @@ dependencies = [
 
 [project.optional-dependencies]
 gui = [
-    "customtkinter>=5.2.2"
+    "nicegui>=1.4.0"
 ]
 dev = [
     "pytest>=6.0.0",
@@ -59,9 +58,7 @@ docs = [
 [project.scripts]
 yamble = "yamble.cli.main:main"
 dcm = "yamble.cli.main:main"
-
-[project.gui-scripts]
-yamble-gui = "yamble.gui.main:main"
+yamble-gui = "yamble.gui.launcher:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

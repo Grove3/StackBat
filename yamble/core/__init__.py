@@ -2,7 +2,6 @@
 Core functionality for Yamble
 """
 
-from .manager import YambleManager
-from .templates import create_sample_templates
+from yamble.core.manager import YambleManager
 
-__all__ = ["YambleManager", "create_sample_templates"]
+__all__ = ["YambleManager"]
