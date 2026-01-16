@@ -199,7 +199,7 @@ Profiles enable you to define a single configuration that automatically generate
 ```yml
 configurations:
   multi_env_app:
-    selected_templates:
+    templates:
       - "traefik.yml.j2"
       - "web_app.yml.j2"
     variables:
@@ -254,7 +254,7 @@ Variables not listed in the profile's variables section remain the same across a
 ```yml
 configurations:
   microservices_stack:
-    selected_templates:
+    templates:
       - "api_gateway.yml.j2"
       - "user_service.yml.j2"
       - "payment_service.yml.j2"

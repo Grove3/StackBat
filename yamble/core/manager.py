@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class ConfigVariables(TypedDict):
-    selected_templates: List[str]
+    templates: List[str]
     variables: Dict[str, Dict[str, Any]]
 
 
@@ -303,12 +303,12 @@ class YambleManager:
                 configs = self.configurations.get("configurations", {})
                 for key, value in configs.items():
                     flat_templates = []
-                    for item in value.get("selected_templates", []):
+                    for item in value.get("templates", []):
                         if isinstance(item, list):
                             flat_templates.extend(item)
                         else:
                             flat_templates.append(item)
-                    value["selected_templates"] = list(set(flat_templates))
+                    value["templates"] = list(set(flat_templates))
 
                 logger.info(f"Loaded {len(self.configurations)} configurations")
             except Exception as e:
@@ -446,7 +446,7 @@ class YambleManager:
     def save_configuration(
         self,
         name: str,
-        selected_templates: List[str],
+        templates: List[str],
         variables: dict[str, dict[str, Any]],
     ) -> None:
         """
@@ -454,11 +454,11 @@ class YambleManager:
 
         Args:
             name: Configuration name
-            selected_templates: Selected templates by category
+            templates: Selected templates by category
             variables: Template variables
         """
         config: ConfigVariables = {
-            "selected_templates": selected_templates.copy(),
+            "templates": templates.copy(),
             "variables": variables.copy(),
         }
 

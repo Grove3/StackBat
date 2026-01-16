@@ -145,7 +145,7 @@ class ClickLogger:
             click.echo(f"\n{click.style(config_name, bold=True, fg='blue')}")
 
             if config:
-                selected = config.get("selected_templates", {})
+                selected = config.get("templates", {})
                 if selected:
                     click.echo(click.style("  Templates:", fg="yellow"))
                     for template in selected:
